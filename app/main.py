@@ -7,7 +7,7 @@ def main():
     pass
 
 # taking user input
-command = input("Enter the command : ")
+command = input()
 print(f"{command} : command not found")
 
 
