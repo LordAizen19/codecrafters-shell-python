@@ -2,14 +2,13 @@ import sys
 
 def main():
     while True:  #infinite loop keeps running forever
-        # TODO: Uncomment the code below to pass the first stage
         sys.stdout.write("$ ")
-        sys.stdout.flush()
-        # pass
-
-        # taking user input
+        valid_commands = ["echo", "exit", "help", "clear", "cd", "ls"]
         command = input().strip()
-        print(f"{command}: command not found")
+        if command is not None and command not in valid_commands:
+            print(f"{command}: command not found")
+        elif command == "exit":
+            break
 
 
 if __name__ == "__main__":
