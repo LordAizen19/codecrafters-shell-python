@@ -1,6 +1,9 @@
 import sys
 
 BUILTINS = {
+    "type": lambda x: print(
+        f"{x} is a shell builtin" if x in BUILTINS else f"{x}: not found"
+    ),
     "exit": lambda code=0, *_: sys.exit(int(code)),
     "echo": lambda *args: print(" ".join(args)),
 }
