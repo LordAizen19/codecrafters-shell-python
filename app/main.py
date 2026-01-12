@@ -37,37 +37,42 @@ def find_executable(cmd):
 def run_external_program(cmd, args):
     """Find and execute an external program"""
 
-    # Find the executable in PATH
     executable_path = find_executable(cmd)
 
     if not executable_path:
         print(f"{cmd}: command not found")
         return
 
-    # Execute the program
-    # Pass cmd as argv[0], then the actual arguments
     try:
-        result = subprocess.run([cmd] + args, executable=executable_path)
+        subprocess.run([cmd] + args, executable=executable_path)
     except Exception as e:
         print(f"{cmd}: error executing: {e}")
+
+
+# -------- NEW BUILTIN ----------
+def pwd_command(*args):
+    """Print the current working directory"""
+    print(os.getcwd())
+# ------------------------------
 
 
 BUILTINS = {
     "type": type_command,
     "exit": lambda code=0, *_: sys.exit(int(code)),
     "echo": lambda *args: print(" ".join(args)),
+    "pwd": pwd_command,      # <-- register pwd
 }
 
 
 def main():
-    while True:  # infinite loop keeps running forever
+    while True:
         sys.stdout.write("$ ")
         sys.stdout.flush()
 
         user_input = input().strip()
-
         parts = user_input.split()
-        if not parts:  # Handle empty input
+
+        if not parts:
             continue
 
         cmd = parts[0]
@@ -76,7 +81,6 @@ def main():
         if cmd in BUILTINS:
             BUILTINS[cmd](*args)
         else:
-            # Not a builtin, try to run as external program
             run_external_program(cmd, args)
 
 
