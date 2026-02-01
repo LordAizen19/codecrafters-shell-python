@@ -2,86 +2,70 @@ import sys
 import os
 import subprocess
 
-
-def type_command(cmd):
-    """Handle the 'type' builtin command"""
-
-    # Step 1: Check if it's a builtin
-    if cmd in BUILTINS:
-        print(f"{cmd} is a shell builtin")
-        return
-
-    # Step 2: Search for executable in PATH
-    executable_path = find_executable(cmd)
-
-    if executable_path:
-        print(f"{cmd} is {executable_path}")
-    else:
-        print(f"{cmd}: not found")
-
-
-def find_executable(cmd):
-    """Search for an executable in PATH and return its full path if found"""
-    path_env = os.environ.get("PATH", "")
-    directories = path_env.split(os.pathsep)
-
-    for directory in directories:
-        full_path = os.path.join(directory, cmd)
-
+def check_command_in_path(command, paths_list):
+    for path in paths_list:
+        full_path = os.path.join(path, command)
         if os.path.isfile(full_path) and os.access(full_path, os.X_OK):
             return full_path
-
     return None
 
 
-def run_external_program(cmd, args):
-    """Find and execute an external program"""
-
-    executable_path = find_executable(cmd)
-
-    if not executable_path:
-        print(f"{cmd}: command not found")
-        return
-
-    try:
-        subprocess.run([cmd] + args, executable=executable_path)
-    except Exception as e:
-        print(f"{cmd}: error executing: {e}")
-
-
-# -------- NEW BUILTIN ----------
-def pwd_command(*args):
-    """Print the current working directory"""
-    print(os.getcwd())
-# ------------------------------
-
-
-BUILTINS = {
-    "type": type_command,
-    "exit": lambda code=0, *_: sys.exit(int(code)),
-    "echo": lambda *args: print(" ".join(args)),
-    "pwd": pwd_command,      # <-- register pwd
-}
-
-
 def main():
+    # TODO: Uncomment the code below to pass the first stage
+    commands_list = ["echo", "type", "exit", "pwd", "cd"]
+    path_env = os.environ.get("PATH", "")
+    paths_list = path_env.split(os.pathsep)
+
     while True:
         sys.stdout.write("$ ")
-        sys.stdout.flush()
+        command = input()
 
-        user_input = input().strip()
-        parts = user_input.split()
+        if command.strip() == "exit" and len(command) == 4:
+            break
 
-        if not parts:
-            continue
+        elif command[0:4].strip() == "echo":
+            if len(command) > 5:
+                print(command[5:])
+            else:
+                print(f"{command}: command not found")
 
-        cmd = parts[0]
-        args = parts[1:]
+        elif command[0:3].strip() == "pwd" and len(command) == 3:
+            print(os.getcwd())
 
-        if cmd in BUILTINS:
-            BUILTINS[cmd](*args)
+        elif command.strip().split()[0] == "cd":
+            parts = command.strip().split()
+            if len(parts) == 1:
+                os.chdir(os.path.expanduser("~"))
+            elif len(parts) == 2:
+                if parts[1][0] == "/":
+                    try:
+                        os.chdir(parts[1])
+                    except FileNotFoundError:
+                        print(f"cd: {parts[1]}: No such file or directory")
+                else:
+                    full_path = os.getcwd()
+                    try:
+                        os.chdir(full_path + parts[1])
+                    except FileNotFoundError:
+                        print(f"cd: {parts[1]}: No such file or directory")
+
+        elif command[0:4].strip() == "type":
+            if command[5:] in commands_list:
+                print(f"{command[5:]} is a shell builtin")
+                continue
+
+            res = check_command_in_path(command[5:], paths_list)
+            if res:
+                print(f"{command[5:]} is {res}")
+            else:
+                print(f"{command[5:]}: not found")
+
         else:
-            run_external_program(cmd, args)
+            cmd = check_command_in_path(command.split()[0], paths_list)
+            if cmd is not None:
+                subprocess.run(command.strip(), shell=True)
+            else:
+                print(f"{command}: command not found")
 
 
 if __name__ == "__main__":
