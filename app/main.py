@@ -3,6 +3,36 @@ import os
 import subprocess
 
 
+def parse_command_with_quotes(command_string):
+    """
+    Parse command string, handling single quotes.
+
+    Single quotes preserve all characters literally, including spaces.
+    Adjacent quoted strings are concatenated.
+    """
+    arguments = []
+    current_argument = ""
+    inside_quotes = False
+
+    for char in command_string:
+        if char == "'":
+            inside_quotes = not inside_quotes
+        elif char in (' ', '\t'):
+            if inside_quotes:
+                current_argument += char
+            else:
+                if current_argument:
+                    arguments.append(current_argument)
+                    current_argument = ""
+        else:
+            current_argument += char
+
+    if current_argument:
+        arguments.append(current_argument)
+
+    return arguments
+
+
 def find_executable_in_path(command_name, path_directories):
     """
     Search for an executable command in the PATH directories.
@@ -122,25 +152,13 @@ def execute_external_command(command_parts, path_directories):
 
 
 def parse_command(command_string):
-    """
-    Parse a command string into command name and arguments.
-
-    Args:
-        command_string: Raw input string from user
-
-    Returns:
-        Tuple of (command_name, arguments_list)
-        Returns (None, None) if command is empty
-    """
-    parts = command_string.strip().split()
+    """Parse command with proper quote handling."""
+    parts = parse_command_with_quotes(command_string.strip())
 
     if not parts:
         return None, None
 
-    command_name = parts[0]
-    arguments = parts[1:]
-
-    return command_name, arguments
+    return parts[0], parts[1:]
 
 
 def main():

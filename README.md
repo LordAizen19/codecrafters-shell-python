@@ -1,110 +1,77 @@
-# codecrafters-shell-python
+<p align="center">
+  <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAfCAMAAACxiD++AAAAzFBMVEVHcEwQv+0A4O8Pwe4vg+06a+s6fuoF2fNmE+dGVuZULt9kEeID2u5DVuYRvuwRvuxXLeRYLeRGVuUZpOJYLOVOE7Iojekhm+phGOJNQ+RhGuJOQeQODxQRERcTFBoVFh0AAAD///8TAQAEDACTk5QepvAZOV4FBw9WV1kODgsvLzNdJehOROkNud1tbW8+P0LMzMwnFVwaI0bn5+clTZRYGc4ih9USWGVEWOw8FYwToc0+T9FKLMW1trccGjEWao0PhZhhYWSBgoQuLoo2PTGRAAAAHHRSTlMAziH4/fwB/v4d+Kenp1CUlMQy2NzWoK1SUk5OwOG+6QAAAdFJREFUKJFtk1l3mzAQheWG1a63nJ4srSRGIkBYAg7xWjd2lv//nzKSgEDS+8LDd3VnRhoI6eTM5qML1Gg+c8h3/fjpuu7FX1SEuva/csQP51pq1edtZF0NjyPeSckDJc6kjLeW5Q/4i2RBI45K5dqyLnt8J4Ogb+BcxpbdZvyPK4dtt/29yB4GaB1re2oKPAz4aqUdjDE47n0dsGOfhuRVPIHhLI33GOF0AZQyHsCzuIOEMi04Fg6ZtR1AVlWMw5OosioDxWn6XvwhczfWFeBOiDKhFVYoBaboGnWxICNXtvweOH6eAe4bBw2LJRnpFhqOM4gSmHFQSsPxL2PA3sUbcgZCAHYIb8rfM3QVSrHC7GFChI/IVXHxCnrIT07DfEnmUczUzekp1JCJmULxtM4XZBadpb5ayLJMDclolp00p+Eh/02caKsNnFGqh8TpkoQaw8bD7byO4tQ8H8MKpTI0Ch+9CT6W30Sou8eXpD3DxtMrc2WtpTFQGPCDDkBZVixZp14Br1k5v+egfd7t9aVtr2U6OI75XrfVmGHbxxrC1NA0DB83vfNa0/3++H4KtU4HxJOv/54/LVD/UHmee5Nv/ybKuV0sx3k+Xi5uHNL93x+Do2IF3gwEkwAAAABJRU5ErkJggg==" alt="CodeCrafters" width="96" />
+</p>
 
-[![Language: Python](https://img.shields.io/badge/language-Python-blue)](https://www.python.org/)
-[![License](https://img.shields.io/badge/license-See%20LICENSE-lightgrey)](./LICENSE)
+# CodeCrafters — Python Shell
 
-A small, educational implementation of a minimal Unix-like shell in Python — an exercise commonly used in the CodeCrafters challenge series. This repository contains the Python implementation, supporting modules, and tests used while building a simple command-line shell.
+A small, educational Unix-like shell implemented in Python as part of the CodeCrafters "Build Your Own Shell" challenge. This repository focuses on command tokenization and correct handling of single-quoted input.
 
-Why this project / Problem statement
-- Learning how a shell parses input, launches subprocesses, and handles basic builtins is a practical way to understand operating system concepts and process control.
-- This project aims to implement a minimal, readable shell in Python for learning and experimentation.
+## Short description
+A minimal, readable Python shell implementation that demonstrates character-by-character parsing for single-quote handling and basic tokenization.
 
-Key features (conservative / to be adjusted per code)
-- Minimal interactive shell loop that reads user input.
-- Command parsing and tokenization.
-- Execution of external commands via Python's subprocess APIs.
-- Support for a small set of shell builtins (e.g., cd, exit) — adjust this list to match the repository implementation.
-- Basic piping and redirection may be present; please verify in the code and update this section accordingly.
+## Project overview
+This project implements the parsing stage of a shell: reading a command string and splitting it into tokens while correctly handling single quotes. The implemented stage preserves spaces inside single quotes, concatenates adjacent quoted segments, and uses stateful, character-by-character parsing to produce reliable tokens.
 
-Tech stack
-- Language: Python 3.8+
-- Standard library modules: subprocess, os, shlex (likely)
-- Optional: pytest or unittest for tests (if present in repo)
-- No heavy frameworks — the project is intentionally lightweight
+## Implemented features
+- Command tokenization (splits input into argument tokens)
+- Single-quote handling
+- Preservation of spaces inside single quotes
+- Concatenation of adjacent quoted strings
+- Character-by-character parsing with simple state tracking
 
-Architecture / workflow overview
-- Main interactive loop: read -> parse -> execute -> repeat
-- Parser module: tokenizes and converts input into command objects
-- Executor module: runs commands (builtins handled in-process; external commands run via subprocess)
-- Tests (if present): unit tests for parser and executor behavior
+## How single-quote parsing works (high-level)
+- The parser scans the input one character at a time.
+- It tracks an inside_quotes boolean (or equivalent) to know whether the parser is currently inside a single-quoted section.
+- When inside_quotes is true:
+  - Spaces are treated as literal characters and appended to the current token.
+  - Characters are appended until a closing single quote is found.
+- When inside_quotes is false:
+  - Unquoted spaces act as token separators.
+  - Single-quote characters switch the parser into inside_quotes mode; a following single quote exits that mode.
+- Adjacent quoted segments and unquoted segments are concatenated into the same token when not separated by unquoted spaces.
 
-Installation & setup
-1. Clone the repository:
-   git clone <repo-url>
-   cd codecrafters-shell-python
+This state-based approach ensures that quoted sequences are preserved as intended while still splitting on unquoted whitespace.
 
-2. (Optional) Create & activate a virtual environment:
-   python3 -m venv .venv
-   source .venv/bin/activate   # macOS / Linux
-   .venv\Scripts\activate      # Windows (PowerShell)
+## Code example
+A short usage example showing the parser in action (do not modify the implementation):
 
-3. Install dependencies (if any):
-   - If the repo contains requirements.txt:
-       pip install -r requirements.txt
-   - If no requirements.txt is present, the project likely uses only the Python standard library.
+```python
+# Example usage (adjust import path to your repo layout)
+# from parser import parse_command_with_quotes
 
-Environment variables & configuration
-- This project typically does not require custom environment variables.  
-- If there are configuration files or env entries used by the code, update this section with the exact variables (e.g., SHELL_DEBUG=true). Check the repository for references to os.environ or a .env file.
+input_str = "echo 'hello world' foo''bar baz"
+tokens = parse_command_with_quotes(input_str)
 
-Usage examples
-- Run the shell (example commands — adjust to actual entry point in the repo):
-  - If there is a script called `shell.py`:
-      python shell.py
-  - If the repo exposes a package entrypoint:
-      python -m codecrafters_shell
+# Expected tokens:
+# ["echo", "hello world", "foobar", "baz"]
+```
 
-- Typical session (example):
-  $ ls -la
-  $ cd src
-  $ echo "hello world"
-  $ exit
+## Running the program
+The tester runs the shell as:
+```bash
+./your_program.sh
+```
+(Replace with the actual script or entry point filename if different in this repository.)
 
-- Running tests (if tests exist):
-  - pytest
-  - or
-  - python -m unittest discover
+## What I learned today
+- Quotes group text into single arguments.
+- Spaces inside single quotes are preserved verbatim.
+- Adjacent quoted strings (or quoted + unquoted segments without separating spaces) concatenate into one token.
+- Character-by-character parsing is required to correctly handle quoting edge cases.
+- State tracking (inside_quotes boolean) is a simple and effective control mechanism.
 
-Folder structure (example / adjust to actual repo)
-- README.md                     <- This file
-- LICENSE                       <- License file (if present)
-- requirements.txt              <- Python dependencies (optional)
-- shell.py / main.py            <- Shell entrypoint (may be named differently)
-- src/ or codecrafters_shell/   <- Core modules: parser, executor, builtins
-- tests/                        <- Unit / integration tests
+## Challenges faced
+- Handling quoted input correctly is error-prone: deciding when spaces act as separators versus literal characters is central to correctness.
+- Adjacent quotes and empty quoted segments complicate token assembly.
+- The solution requires careful state transitions (enter/exit quote) and correct concatenation logic.
 
-API / core module explanation
-- parser.py (or equivalent)
-  - Responsible for tokenizing input and building a simple command structure.
-- executor.py (or equivalent)
-  - Responsible for executing commands: deciding between builtin handlers and launching subprocesses.
-- builtins.py (or equivalent)
-  - Implements in-process commands like `cd` and `exit`.
-- main / shell loop
-  - Runs a REPL that reads user input, uses parser + executor to handle commands.
+## Next steps
+Planned improvements for subsequent stages:
+- Support double quotes and escapes inside double quotes.
+- Implement escape character handling (backslash).
+- Add execution of parsed commands, pipelines, and redirections.
+- Add tests around more edge cases and interactive behaviors.
 
-Screenshots / diagrams
-- (Placeholder) Add screenshots or an architecture diagram here if you create one.
-  ![screenshot-placeholder](./docs/screenshot-placeholder.png)
-  Or add an ASCII diagram:
-  REPL -> Parser -> Executor -> [Builtin | Subprocess]
-
-Roadmap / future improvements
-- Add robust parsing (quotes, escapes, job control) if not already present.
-- Improve piping and redirection support and add tests for corner cases.
-- Add a CI workflow (GitHub Actions) for linting and running tests.
-- Add more builtins, command history, and tab completion as optional features.
-
-Contribution guidelines
-- Contributions are welcome. Please:
-  1. Open an issue to discuss larger changes before implementing.
-  2. Fork the repository and create a feature branch.
-  3. Keep changes small and focused; include tests for new behavior.
-  4. Submit a pull request with a clear description of changes.
-
-License
-- See the LICENSE file in the repository root for license details. If there is no LICENSE file, add one (MIT or other) if you plan to open-source this project.
-
-Notes & next steps
-- This README was generated to be conservative about implemented features. Please update the Key features, Usage, and Folder structure sections to exactly match the files and modules present in this repository.
-- If you want, I can scan the repository files and update feature and usage sections to be fully accurate — add the repo files to the working set or request a file listing if you want a more exact README.
+## Notes
+- This README intentionally documents only the parsing stage implemented here. If you need exact filenames or the program entry point, check the repository root for the script used by the tester.
+- Replace the logo path `assets/codecrafters-logo.png` with the actual logo file if you add one to the repository.
