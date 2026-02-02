@@ -51,7 +51,6 @@ The tester runs the shell as:
 ```bash
 ./your_program.sh
 ```
-(Replace with the actual script or entry point filename if different in this repository.)
 
 ## What I learned today
 - Quotes group text into single arguments.
