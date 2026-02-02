@@ -142,9 +142,9 @@ def execute_external_command(command_parts, path_directories):
 
     if executable_path:
         try:
-            # Execute the command
-            # Using the full command string for shell features (pipes, redirects, etc.)
-            subprocess.run(' '.join(command_parts), shell=True)
+            # Execute the command using list form to preserve arguments
+            # This ensures filenames with spaces are passed correctly
+            subprocess.run([executable_path] + command_parts[1:])
         except Exception as e:
             print(f"Error executing {command_name}: {e}")
     else:
