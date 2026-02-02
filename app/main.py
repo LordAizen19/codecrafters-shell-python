@@ -2,70 +2,199 @@ import sys
 import os
 import subprocess
 
-def check_command_in_path(command, paths_list):
-    for path in paths_list:
-        full_path = os.path.join(path, command)
+
+def find_executable_in_path(command_name, path_directories):
+    """
+    Search for an executable command in the PATH directories.
+
+    Args:
+        command_name: Name of the command to find (e.g., 'ls', 'cat')
+        path_directories: List of directories to search
+
+    Returns:
+        Full path to the executable if found, None otherwise
+    """
+    for directory in path_directories:
+        full_path = os.path.join(directory, command_name)
         if os.path.isfile(full_path) and os.access(full_path, os.X_OK):
             return full_path
     return None
 
 
+def handle_exit_command(args):
+    """Handle the 'exit' command."""
+    return True  # Signal to exit the shell
+
+
+def handle_echo_command(args):
+    """Handle the 'echo' command - prints arguments to stdout."""
+    if args:
+        print(' '.join(args))
+    else:
+        print()  # Print empty line if no arguments
+
+
+def handle_pwd_command(args):
+    """Handle the 'pwd' command - prints current working directory."""
+    print(os.getcwd())
+
+
+def handle_cd_command(args):
+    """
+    Handle the 'cd' command - changes current working directory.
+
+    Args:
+        args: List of arguments (should contain 0 or 1 path)
+    """
+    # No argument: go to home directory
+    if not args:
+        target_directory = os.path.expanduser("~")
+    else:
+        target_directory = args[0]
+
+        # Handle special case: ~ expansion
+        if target_directory.startswith("~"):
+            target_directory = os.path.expanduser(target_directory)
+        # Handle relative paths (not starting with /)
+        elif not target_directory.startswith("/"):
+            target_directory = os.path.join(os.getcwd(), target_directory)
+
+    # Attempt to change directory
+    try:
+        os.chdir(target_directory)
+    except FileNotFoundError:
+        print(f"cd: {args[0]}: No such file or directory")
+    except NotADirectoryError:
+        print(f"cd: {args[0]}: Not a directory")
+    except PermissionError:
+        print(f"cd: {args[0]}: Permission denied")
+
+
+def handle_type_command(args, builtin_commands, path_directories):
+    """
+    Handle the 'type' command - shows what kind of command something is.
+
+    Args:
+        args: List of arguments (should contain command name)
+        builtin_commands: Set of built-in command names
+        path_directories: List of PATH directories to search
+    """
+    if not args:
+        print("type: missing argument")
+        return
+
+    command_name = args[0]
+
+    # Check if it's a built-in command
+    if command_name in builtin_commands:
+        print(f"{command_name} is a shell builtin")
+    else:
+        # Check if it exists in PATH
+        executable_path = find_executable_in_path(command_name, path_directories)
+        if executable_path:
+            print(f"{command_name} is {executable_path}")
+        else:
+            print(f"{command_name}: not found")
+
+
+def execute_external_command(command_parts, path_directories):
+    """
+    Execute an external command (not a shell built-in).
+
+    Args:
+        command_parts: List of command and its arguments
+        path_directories: List of PATH directories to search
+    """
+    command_name = command_parts[0]
+
+    # Find the executable
+    executable_path = find_executable_in_path(command_name, path_directories)
+
+    if executable_path:
+        try:
+            # Execute the command
+            # Using the full command string for shell features (pipes, redirects, etc.)
+            subprocess.run(' '.join(command_parts), shell=True)
+        except Exception as e:
+            print(f"Error executing {command_name}: {e}")
+    else:
+        print(f"{command_name}: command not found")
+
+
+def parse_command(command_string):
+    """
+    Parse a command string into command name and arguments.
+
+    Args:
+        command_string: Raw input string from user
+
+    Returns:
+        Tuple of (command_name, arguments_list)
+        Returns (None, None) if command is empty
+    """
+    parts = command_string.strip().split()
+
+    if not parts:
+        return None, None
+
+    command_name = parts[0]
+    arguments = parts[1:]
+
+    return command_name, arguments
+
+
 def main():
-    # TODO: Uncomment the code below to pass the first stage
-    commands_list = ["echo", "type", "exit", "pwd", "cd"]
+    """Main shell loop."""
+
+    # Define built-in commands (using a set for O(1) lookup)
+    BUILTIN_COMMANDS = {"echo", "type", "exit", "pwd", "cd"}
+
+    # Get PATH environment variable and split into directories
     path_env = os.environ.get("PATH", "")
-    paths_list = path_env.split(os.pathsep)
+    path_directories = path_env.split(os.pathsep)
 
+    # Main REPL (Read-Eval-Print Loop)
     while True:
+        # Display prompt
         sys.stdout.write("$ ")
-        command = input()
+        sys.stdout.flush()  # Ensure prompt is displayed immediately
 
-        if command.strip() == "exit" and len(command) == 4:
+        # Read user input
+        try:
+            user_input = input()
+        except EOFError:
+            # Handle Ctrl+D gracefully
+            print()
             break
 
-        elif command[0:4].strip() == "echo":
-            if len(command) > 5:
-                print(command[5:])
-            else:
-                print(f"{command}: command not found")
+        # Parse the command
+        command_name, arguments = parse_command(user_input)
 
-        elif command[0:3].strip() == "pwd" and len(command) == 3:
-            print(os.getcwd())
+        # Skip empty commands
+        if command_name is None:
+            continue
 
-        elif command.strip().split()[0] == "cd":
-            parts = command.strip().split()
-            if len(parts) == 1:
-                os.chdir(os.path.expanduser("~"))
-            elif len(parts) == 2:
-                if parts[1][0] == "/":
-                    try:
-                        os.chdir(parts[1])
-                    except FileNotFoundError:
-                        print(f"cd: {parts[1]}: No such file or directory")
-                else:
-                    full_path = os.getcwd()
-                    try:
-                        os.chdir(full_path + parts[1])
-                    except FileNotFoundError:
-                        print(f"cd: {parts[1]}: No such file or directory")
+        # Execute built-in commands
+        if command_name == "exit":
+            should_exit = handle_exit_command(arguments)
+            if should_exit:
+                break
 
-        elif command[0:4].strip() == "type":
-            if command[5:] in commands_list:
-                print(f"{command[5:]} is a shell builtin")
-                continue
+        elif command_name == "echo":
+            handle_echo_command(arguments)
 
-            res = check_command_in_path(command[5:], paths_list)
-            if res:
-                print(f"{command[5:]} is {res}")
-            else:
-                print(f"{command[5:]}: not found")
+        elif command_name == "pwd":
+            handle_pwd_command(arguments)
 
+        elif command_name == "cd":
+            handle_cd_command(arguments)
+
+        elif command_name == "type":
+            handle_type_command(arguments, BUILTIN_COMMANDS, path_directories)
+
+        # Execute external commands
         else:
-            cmd = check_command_in_path(command.split()[0], paths_list)
-            if cmd is not None:
-                subprocess.run(command.strip(), shell=True)
-            else:
-                print(f"{command}: command not found")
+            execute_external_command([command_name] + arguments, path_directories)
 
 
 if __name__ == "__main__":
