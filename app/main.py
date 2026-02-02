@@ -137,14 +137,18 @@ def execute_external_command(command_parts, path_directories):
     """
     command_name = command_parts[0]
 
-    # Find the executable
+    # Find the executable in PATH
     executable_path = find_executable_in_path(command_name, path_directories)
 
     if executable_path:
         try:
-            # Execute the command using list form to preserve arguments
-            # This ensures filenames with spaces are passed correctly
-            subprocess.run([executable_path] + command_parts[1:])
+            # Execute the program:
+            # - executable: the full path where the program actually is
+            # - command_parts: what the program sees as argv (includes name as typed)
+            subprocess.run(
+                command_parts,
+                executable=executable_path
+            )
         except Exception as e:
             print(f"Error executing {command_name}: {e}")
     else:
