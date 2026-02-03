@@ -1,76 +1,126 @@
 <p align="center">
-  <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAfCAMAAACxiD++AAAAzFBMVEVHcEwQv+0A4O8Pwe4vg+06a+s6fuoF2fNmE+dGVuZULt9kEeID2u5DVuYRvuwRvuxXLeRYLeRGVuUZpOJYLOVOE7Iojekhm+phGOJNQ+RhGuJOQeQODxQRERcTFBoVFh0AAAD///8TAQAEDACTk5QepvAZOV4FBw9WV1kODgsvLzNdJehOROkNud1tbW8+P0LMzMwnFVwaI0bn5+clTZRYGc4ih9USWGVEWOw8FYwToc0+T9FKLMW1trccGjEWao0PhZhhYWSBgoQuLoo2PTGRAAAAHHRSTlMAziH4/fwB/v4d+Kenp1CUlMQy2NzWoK1SUk5OwOG+6QAAAdFJREFUKJFtk1l3mzAQheWG1a63nJ4srSRGIkBYAg7xWjd2lv//nzKSgEDS+8LDd3VnRhoI6eTM5qML1Gg+c8h3/fjpuu7FX1SEuva/csQP51pq1edtZF0NjyPeSckDJc6kjLeW5Q/4i2RBI45K5dqyLnt8J4Ogb+BcxpbdZvyPK4dtt/29yB4GaB1re2oKPAz4aqUdjDE47n0dsGOfhuRVPIHhLI33GOF0AZQyHsCzuIOEMi04Fg6ZtR1AVlWMw5OosioDxWn6XvwhczfWFeBOiDKhFVYoBaboGnWxICNXtvweOH6eAe4bBw2LJRnpFhqOM4gSmHFQSsPxL2PA3sUbcgZCAHYIb8rfM3QVSrHC7GFChI/IVXHxCnrIT07DfEnmUczUzekp1JCJmULxtM4XZBadpb5ayLJMDclolp00p+Eh/02caKsNnFGqh8TpkoQaw8bD7byO4tQ8H8MKpTI0Ch+9CT6W30Sou8eXpD3DxtMrc2WtpTFQGPCDDkBZVixZp14Br1k5v+egfd7t9aVtr2U6OI75XrfVmGHbxxrC1NA0DB83vfNa0/3++H4KtU4HxJOv/54/LVD/UHmee5Nv/ybKuV0sx3k+Xi5uHNL93x+Do2IF3gwEkwAAAABJRU5ErkJggg==" alt="CodeCrafters" width="96" />
+  <img src="file:///home/ichigoat/Desktop/Python-Projects/Images/logo.png" alt="CodeCrafters" width="120" />
 </p>
 
-# CodeCrafters — Python Shell
+# Build Your Own Shell — Python
 
-A small, educational Unix-like shell implemented in Python as part of the CodeCrafters "Build Your Own Shell" challenge. This repository focuses on command tokenization and correct handling of single-quoted input.
+A Unix-like shell implementation in Python, built as part of the CodeCrafters "Build Your Own Shell" challenge.
 
-## Short description
-A minimal, readable Python shell implementation that demonstrates character-by-character parsing for single-quote handling and basic tokenization.
+## Overview
 
-## Project overview
-This project implements the parsing stage of a shell: reading a command string and splitting it into tokens while correctly handling single quotes. The implemented stage preserves spaces inside single quotes, concatenates adjacent quoted segments, and uses stateful, character-by-character parsing to produce reliable tokens.
+This project implements a basic shell with command parsing and quote handling. The current completed stage focuses on double-quote parsing, building on previous work with single quotes. The parser correctly handles both single and double quotes, preserving spaces within quotes and concatenating adjacent quoted strings.
 
-## Implemented features
-- Command tokenization (splits input into argument tokens)
+## Implemented Features
+
+- Command tokenization
 - Single-quote handling
-- Preservation of spaces inside single quotes
+- Double-quote handling
+- Preserving spaces inside quotes
 - Concatenation of adjacent quoted strings
-- Character-by-character parsing with simple state tracking
+- Character-by-character parsing with state tracking
 
-## How single-quote parsing works (high-level)
-- The parser scans the input one character at a time.
-- It tracks an inside_quotes boolean (or equivalent) to know whether the parser is currently inside a single-quoted section.
-- When inside_quotes is true:
-  - Spaces are treated as literal characters and appended to the current token.
-  - Characters are appended until a closing single quote is found.
-- When inside_quotes is false:
-  - Unquoted spaces act as token separators.
-  - Single-quote characters switch the parser into inside_quotes mode; a following single quote exits that mode.
-- Adjacent quoted segments and unquoted segments are concatenated into the same token when not separated by unquoted spaces.
+## How Quote Parsing Works
 
-This state-based approach ensures that quoted sequences are preserved as intended while still splitting on unquoted whitespace.
+The parser uses a state machine approach to handle both single and double quotes:
 
-## Code example
-A short usage example showing the parser in action (do not modify the implementation):
+- A `quote_state` variable tracks the current parsing context: `None`, `'SINGLE'`, or `'DOUBLE'`
+- When encountering a quote character:
+  - If outside any quotes, enter the corresponding quote state
+  - If inside the matching quote type, exit that state
+  - If inside a different quote type, treat the character as literal
+- Whitespace behavior depends on the quote state:
+  - Inside quotes: whitespace is preserved as part of the token
+  - Outside quotes: whitespace separates tokens
+- Adjacent quoted and unquoted segments without separating whitespace are concatenated into a single token
+
+This state-based parsing ensures correct handling of nested quote scenarios like `echo "shell's test"` or `echo 'say "hello"'`.
+
+## Code Example
 
 ```python
-# Example usage (adjust import path to your repo layout)
-# from parser import parse_command_with_quotes
-
-input_str = "echo 'hello world' foo''bar baz"
-tokens = parse_command_with_quotes(input_str)
-
-# Expected tokens:
-# ["echo", "hello world", "foobar", "baz"]
+def parse_command_with_quotes(command_string):
+    """
+    Parse command string, handling both single and double quotes.
+    
+    Examples:
+        echo "hello world" → ["echo", "hello world"]
+        echo 'hello' "world" → ["echo", "hello", "world"]
+        echo "shell's test" → ["echo", "shell's test"]
+        echo "hello""world" → ["echo", "helloworld"]
+    """
+    arguments = []
+    current_argument = ""
+    quote_state = None  # Can be: None, 'SINGLE', or 'DOUBLE'
+    
+    for char in command_string:
+        if char == "'":
+            if quote_state is None:
+                quote_state = 'SINGLE'
+            elif quote_state == 'SINGLE':
+                quote_state = None
+            else:
+                current_argument += char
+        
+        elif char == '"':
+            if quote_state is None:
+                quote_state = 'DOUBLE'
+            elif quote_state == 'DOUBLE':
+                quote_state = None
+            else:
+                current_argument += char
+        
+        elif char in (' ', '\t'):
+            if quote_state is not None:
+                current_argument += char
+            else:
+                if current_argument:
+                    arguments.append(current_argument)
+                    current_argument = ""
+        
+        else:
+            current_argument += char
+    
+    if current_argument:
+        arguments.append(current_argument)
+    
+    return arguments
 ```
 
-## Running the program
-The tester runs the shell as:
+## Running the Program
+
+The shell can be started using:
+
 ```bash
 ./your_program.sh
 ```
 
-## What I learned today
-- Quotes group text into single arguments.
-- Spaces inside single quotes are preserved verbatim.
-- Adjacent quoted strings (or quoted + unquoted segments without separating spaces) concatenate into one token.
-- Character-by-character parsing is required to correctly handle quoting edge cases.
-- State tracking (inside_quotes boolean) is a simple and effective control mechanism.
+## What I Learned Today
 
-## Challenges faced
-- Handling quoted input correctly is error-prone: deciding when spaces act as separators versus literal characters is central to correctness.
-- Adjacent quotes and empty quoted segments complicate token assembly.
-- The solution requires careful state transitions (enter/exit quote) and correct concatenation logic.
+Quote states can be tracked with a variable (None, 'SINGLE', 'DOUBLE')
 
-## Next steps
-Planned improvements for subsequent stages:
-- Support double quotes and escapes inside double quotes.
-- Implement escape character handling (backslash).
-- Add execution of parsed commands, pipelines, and redirections.
-- Add tests around more edge cases and interactive behaviors.
+Quotes inside other quotes are literal characters
 
-## Notes
-- This README intentionally documents only the parsing stage implemented here. If you need exact filenames or the program entry point, check the repository root for the script used by the tester.
-- Replace the logo path `assets/codecrafters-logo.png` with the actual logo file if you add one to the repository.
+State machines are powerful for parsing
+
+You can handle multiple similar but different cases elegantly
+
+**Key differences from single quotes:**
+
+- Single quotes: Only one quote type to track
+- Double quotes: Need to distinguish between two quote types
+- Solution: Use quote_state instead of boolean
+
+## Challenges Faced
+
+Handling quoted input correctly required careful consideration of several edge cases:
+
+- Determining when spaces should act as separators versus literal characters
+- Managing transitions between different quote states
+- Preserving characters that would normally be special when inside the opposite quote type
+- Concatenating adjacent quoted and unquoted segments correctly
+
+The state machine approach solved these problems by explicitly tracking the current parsing context and adjusting behavior based on that state.
+
+## Next Steps
+
+Backslash inside quotes

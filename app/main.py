@@ -5,33 +5,66 @@ import subprocess
 
 def parse_command_with_quotes(command_string):
     """
-    Parse command string, handling single quotes.
-
-    Single quotes preserve all characters literally, including spaces.
-    Adjacent quoted strings are concatenated.
+    Parse command string, handling both single and double quotes.
+    
+    Single quotes: Everything is literal
+    Double quotes: Everything is literal (for now - later we'll add exceptions)
+    
+    Examples:
+        echo "hello world" → ["echo", "hello world"]
+        echo 'hello' "world" → ["echo", "hello", "world"]
+        echo "shell's test" → ["echo", "shell's test"]
+        echo "hello""world" → ["echo", "helloworld"]
     """
     arguments = []
     current_argument = ""
-    inside_quotes = False
-
+    quote_state = None  # Can be: None, 'SINGLE', or 'DOUBLE'
+    
     for char in command_string:
+        # Handle single quotes
         if char == "'":
-            inside_quotes = not inside_quotes
+            if quote_state is None:
+                # Start single-quoted section
+                quote_state = 'SINGLE'
+            elif quote_state == 'SINGLE':
+                # End single-quoted section
+                quote_state = None
+            else:
+                # We're in double quotes, so ' is a normal character
+                current_argument += char
+        
+        # Handle double quotes
+        elif char == '"':
+            if quote_state is None:
+                # Start double-quoted section
+                quote_state = 'DOUBLE'
+            elif quote_state == 'DOUBLE':
+                # End double-quoted section
+                quote_state = None
+            else:
+                # We're in single quotes, so " is a normal character
+                current_argument += char
+        
+        # Handle whitespace (space or tab)
         elif char in (' ', '\t'):
-            if inside_quotes:
+            if quote_state is not None:
+                # Inside quotes: preserve whitespace
                 current_argument += char
             else:
+                # Outside quotes: whitespace ends the argument
                 if current_argument:
                     arguments.append(current_argument)
                     current_argument = ""
+        
+        # Handle all other characters
         else:
             current_argument += char
-
+    
+    # Don't forget the last argument!
     if current_argument:
         arguments.append(current_argument)
-
+    
     return arguments
-
 
 def find_executable_in_path(command_name, path_directories):
     """
