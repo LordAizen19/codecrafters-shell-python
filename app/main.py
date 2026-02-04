@@ -4,7 +4,7 @@ import subprocess
 
 
 def parse_command_with_quotes(command_string):
-    """
+    r"""
     Parse command string, handling:
     - Single quotes (everything literal)
     - Double quotes (everything literal for now)
