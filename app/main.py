@@ -7,22 +7,21 @@ def parse_command_with_quotes(command_string):
     r"""
     Parse command string, handling:
     - Single quotes (everything literal)
-    - Double quotes (everything literal for now, including backslashes)
+    - Double quotes (backslash escapes \ and " only)
     - Backslash escaping ONLY outside quotes
     
     Backslash rules:
     - Outside quotes: escape next character
     - Inside single quotes: backslash is literal
-    - Inside double quotes: backslash is literal (for this stage)
+    - Inside double quotes: backslash escapes only \ and "
     
     Examples:
         "my program" arg1 → ["my program", "arg1"]
         'exe with spaces' file.txt → ["exe with spaces", "file.txt"]
-        "exe with \'single quotes\'" → ["exe with \'single quotes\'"]
+        "exe with \'single quotes\'" → ["exe with 'single quotes'"]
         echo three\ \ \ spaces → ["echo", "three   spaces"]
-        echo test\nexample → ["echo", "testnexample"]
-        echo hello\\world → ["echo", "hello\world"]
-        echo \'hello\' → ["echo", "'hello'"]
+        echo "world'test'\\'shell" → ["echo", "world'test'\'shell"]
+        echo "test\\nexample" → ["echo", "test\nexample"]
     """
     arguments = []
     current_argument = ""
@@ -32,16 +31,28 @@ def parse_command_with_quotes(command_string):
     for char in command_string:
         # STEP 1: Handle escaped characters
         if escape_next:
-            # Add the character as-is (it's escaped)
-            current_argument += char
+            if quote_state == 'DOUBLE':
+                # Inside double quotes: only \ and " can be escaped
+                if char in ('\\', '"'):
+                    current_argument += char
+                else:
+                    # Not a valid escape sequence - keep the backslash
+                    current_argument += '\\' + char
+            else:
+                # Outside quotes or in single quotes: add character as-is
+                current_argument += char
             escape_next = False
             continue
         
-        # STEP 2: Handle backslash (ONLY works outside quotes)
-        if char == '\\' and quote_state is None:
-            # Next character will be escaped
-            escape_next = True
-            continue  # Don't add the backslash itself
+        # STEP 2: Handle backslash
+        if char == '\\':
+            if quote_state == 'SINGLE':
+                # Inside single quotes: backslash is literal
+                current_argument += char
+            else:
+                # Outside quotes or inside double quotes: next char might be escaped
+                escape_next = True
+            continue
         
         # STEP 3: Handle single quotes
         if char == "'":
@@ -77,10 +88,15 @@ def parse_command_with_quotes(command_string):
                     current_argument = ""
             continue
         
-        # STEP 6: Regular characters (including backslash inside quotes)
+        # STEP 6: Regular characters
         current_argument += char
     
-    # Don't forget the last argument
+    # Don't forget the last argument (also handle dangling backslash)
+    if escape_next:
+        # Trailing backslash outside quotes
+        if quote_state != 'DOUBLE':
+            current_argument += '\\'
+    
     if current_argument:
         arguments.append(current_argument)
     
