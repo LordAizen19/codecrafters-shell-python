@@ -9,12 +9,15 @@ def parse_command_with_quotes(command_string):
     - Single quotes (everything literal)
     - Double quotes (everything literal for now)
     - Backslash escaping outside single quotes
+    - Quoted executable names
     
     Backslash rules:
     - Outside quotes or in double quotes: escape next character
     - Inside single quotes: backslash is literal
     
     Examples:
+        "my program" arg1 → ["my program", "arg1"]
+        'exe with spaces' file.txt → ["exe with spaces", "file.txt"]
         echo three\ \ \ spaces → ["echo", "three   spaces"]
         echo test\nexample → ["echo", "testnexample"]
         echo hello\\world → ["echo", "hello\world"]
@@ -84,7 +87,18 @@ def parse_command_with_quotes(command_string):
 
 
 def find_executable_in_path(command_name, path_directories):
-    """Search for an executable command in the PATH directories."""
+    """
+    Search for an executable command in the PATH directories.
+    
+    Handles executable names with spaces, quotes, and special characters.
+    
+    Args:
+        command_name: Name of the command to find (e.g., 'ls', 'my program')
+        path_directories: List of directories to search
+        
+    Returns:
+        Full path to the executable if found, None otherwise
+    """
     for directory in path_directories:
         full_path = os.path.join(directory, command_name)
         if os.path.isfile(full_path) and os.access(full_path, os.X_OK):
@@ -151,13 +165,26 @@ def handle_type_command(args, builtin_commands, path_directories):
 
 
 def execute_external_command(command_parts, path_directories):
-    """Execute an external command (not a shell built-in)."""
+    """
+    Execute an external command (not a shell built-in).
+    
+    Handles executables with spaces, quotes, and special characters in their names.
+    
+    Args:
+        command_parts: List of command and its arguments
+        path_directories: List of PATH directories to search
+    """
     command_name = command_parts[0]
     
+    # Find the executable in PATH
+    # The command_name has already been unquoted by parse_command_with_quotes
     executable_path = find_executable_in_path(command_name, path_directories)
     
     if executable_path:
         try:
+            # Execute the program:
+            # - executable: the full path where the program actually is
+            # - command_parts: what the program sees as argv (includes name as typed)
             subprocess.run(
                 command_parts,
                 executable=executable_path
@@ -169,7 +196,11 @@ def execute_external_command(command_parts, path_directories):
 
 
 def parse_command(command_string):
-    """Parse command with proper quote and escape handling."""
+    """
+    Parse command with proper quote and escape handling.
+    
+    This works for both quoted executables and quoted arguments.
+    """
     parts = parse_command_with_quotes(command_string.strip())
     
     if not parts:
