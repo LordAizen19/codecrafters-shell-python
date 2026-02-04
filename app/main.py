@@ -7,17 +7,18 @@ def parse_command_with_quotes(command_string):
     r"""
     Parse command string, handling:
     - Single quotes (everything literal)
-    - Double quotes (everything literal for now)
-    - Backslash escaping outside single quotes
-    - Quoted executable names
+    - Double quotes (everything literal for now, including backslashes)
+    - Backslash escaping ONLY outside quotes
     
     Backslash rules:
-    - Outside quotes or in double quotes: escape next character
+    - Outside quotes: escape next character
     - Inside single quotes: backslash is literal
+    - Inside double quotes: backslash is literal (for this stage)
     
     Examples:
         "my program" arg1 → ["my program", "arg1"]
         'exe with spaces' file.txt → ["exe with spaces", "file.txt"]
+        "exe with \'single quotes\'" → ["exe with \'single quotes\'"]
         echo three\ \ \ spaces → ["echo", "three   spaces"]
         echo test\nexample → ["echo", "testnexample"]
         echo hello\\world → ["echo", "hello\world"]
@@ -36,8 +37,8 @@ def parse_command_with_quotes(command_string):
             escape_next = False
             continue
         
-        # STEP 2: Handle backslash (only works outside single quotes)
-        if char == '\\' and quote_state != 'SINGLE':
+        # STEP 2: Handle backslash (ONLY works outside quotes)
+        if char == '\\' and quote_state is None:
             # Next character will be escaped
             escape_next = True
             continue  # Don't add the backslash itself
@@ -76,7 +77,7 @@ def parse_command_with_quotes(command_string):
                     current_argument = ""
             continue
         
-        # STEP 6: Regular characters
+        # STEP 6: Regular characters (including backslash inside quotes)
         current_argument += char
     
     # Don't forget the last argument
