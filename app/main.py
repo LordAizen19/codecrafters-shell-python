@@ -5,48 +5,64 @@ import subprocess
 
 def parse_command_with_quotes(command_string):
     """
-    Parse command string, handling both single and double quotes.
+    Parse command string, handling:
+    - Single quotes (everything literal)
+    - Double quotes (everything literal for now)
+    - Backslash escaping outside single quotes
     
-    Single quotes: Everything is literal
-    Double quotes: Everything is literal (for now - later we'll add exceptions)
+    Backslash rules:
+    - Outside quotes or in double quotes: escape next character
+    - Inside single quotes: backslash is literal
     
     Examples:
-        echo "hello world" → ["echo", "hello world"]
-        echo 'hello' "world" → ["echo", "hello", "world"]
-        echo "shell's test" → ["echo", "shell's test"]
-        echo "hello""world" → ["echo", "helloworld"]
+        echo three\ \ \ spaces → ["echo", "three   spaces"]
+        echo test\nexample → ["echo", "testnexample"]
+        echo hello\\world → ["echo", "hello\world"]
+        echo \'hello\' → ["echo", "'hello'"]
     """
     arguments = []
     current_argument = ""
-    quote_state = None  # Can be: None, 'SINGLE', or 'DOUBLE'
+    quote_state = None  # None, 'SINGLE', or 'DOUBLE'
+    escape_next = False  # True if previous char was backslash
     
     for char in command_string:
-        # Handle single quotes
+        # STEP 1: Handle escaped characters
+        if escape_next:
+            # Add the character as-is (it's escaped)
+            current_argument += char
+            escape_next = False
+            continue
+        
+        # STEP 2: Handle backslash (only works outside single quotes)
+        if char == '\\' and quote_state != 'SINGLE':
+            # Next character will be escaped
+            escape_next = True
+            continue  # Don't add the backslash itself
+        
+        # STEP 3: Handle single quotes
         if char == "'":
             if quote_state is None:
-                # Start single-quoted section
                 quote_state = 'SINGLE'
             elif quote_state == 'SINGLE':
-                # End single-quoted section
                 quote_state = None
             else:
-                # We're in double quotes, so ' is a normal character
+                # Inside double quotes, single quote is literal
                 current_argument += char
+            continue
         
-        # Handle double quotes
-        elif char == '"':
+        # STEP 4: Handle double quotes
+        if char == '"':
             if quote_state is None:
-                # Start double-quoted section
                 quote_state = 'DOUBLE'
             elif quote_state == 'DOUBLE':
-                # End double-quoted section
                 quote_state = None
             else:
-                # We're in single quotes, so " is a normal character
+                # Inside single quotes, double quote is literal
                 current_argument += char
+            continue
         
-        # Handle whitespace (space or tab)
-        elif char in (' ', '\t'):
+        # STEP 5: Handle whitespace
+        if char in (' ', '\t'):
             if quote_state is not None:
                 # Inside quotes: preserve whitespace
                 current_argument += char
@@ -55,28 +71,20 @@ def parse_command_with_quotes(command_string):
                 if current_argument:
                     arguments.append(current_argument)
                     current_argument = ""
+            continue
         
-        # Handle all other characters
-        else:
-            current_argument += char
+        # STEP 6: Regular characters
+        current_argument += char
     
-    # Don't forget the last argument!
+    # Don't forget the last argument
     if current_argument:
         arguments.append(current_argument)
     
     return arguments
 
+
 def find_executable_in_path(command_name, path_directories):
-    """
-    Search for an executable command in the PATH directories.
-
-    Args:
-        command_name: Name of the command to find (e.g., 'ls', 'cat')
-        path_directories: List of directories to search
-
-    Returns:
-        Full path to the executable if found, None otherwise
-    """
+    """Search for an executable command in the PATH directories."""
     for directory in path_directories:
         full_path = os.path.join(directory, command_name)
         if os.path.isfile(full_path) and os.access(full_path, os.X_OK):
@@ -86,7 +94,7 @@ def find_executable_in_path(command_name, path_directories):
 
 def handle_exit_command(args):
     """Handle the 'exit' command."""
-    return True  # Signal to exit the shell
+    return True
 
 
 def handle_echo_command(args):
@@ -94,7 +102,7 @@ def handle_echo_command(args):
     if args:
         print(' '.join(args))
     else:
-        print()  # Print empty line if no arguments
+        print()
 
 
 def handle_pwd_command(args):
@@ -103,26 +111,17 @@ def handle_pwd_command(args):
 
 
 def handle_cd_command(args):
-    """
-    Handle the 'cd' command - changes current working directory.
-
-    Args:
-        args: List of arguments (should contain 0 or 1 path)
-    """
-    # No argument: go to home directory
+    """Handle the 'cd' command - changes current working directory."""
     if not args:
         target_directory = os.path.expanduser("~")
     else:
         target_directory = args[0]
-
-        # Handle special case: ~ expansion
+        
         if target_directory.startswith("~"):
             target_directory = os.path.expanduser(target_directory)
-        # Handle relative paths (not starting with /)
         elif not target_directory.startswith("/"):
             target_directory = os.path.join(os.getcwd(), target_directory)
-
-    # Attempt to change directory
+    
     try:
         os.chdir(target_directory)
     except FileNotFoundError:
@@ -134,25 +133,16 @@ def handle_cd_command(args):
 
 
 def handle_type_command(args, builtin_commands, path_directories):
-    """
-    Handle the 'type' command - shows what kind of command something is.
-
-    Args:
-        args: List of arguments (should contain command name)
-        builtin_commands: Set of built-in command names
-        path_directories: List of PATH directories to search
-    """
+    """Handle the 'type' command - shows what kind of command something is."""
     if not args:
         print("type: missing argument")
         return
-
+    
     command_name = args[0]
-
-    # Check if it's a built-in command
+    
     if command_name in builtin_commands:
         print(f"{command_name} is a shell builtin")
     else:
-        # Check if it exists in PATH
         executable_path = find_executable_in_path(command_name, path_directories)
         if executable_path:
             print(f"{command_name} is {executable_path}")
@@ -161,23 +151,13 @@ def handle_type_command(args, builtin_commands, path_directories):
 
 
 def execute_external_command(command_parts, path_directories):
-    """
-    Execute an external command (not a shell built-in).
-
-    Args:
-        command_parts: List of command and its arguments
-        path_directories: List of PATH directories to search
-    """
+    """Execute an external command (not a shell built-in)."""
     command_name = command_parts[0]
-
-    # Find the executable in PATH
+    
     executable_path = find_executable_in_path(command_name, path_directories)
-
+    
     if executable_path:
         try:
-            # Execute the program:
-            # - executable: the full path where the program actually is
-            # - command_parts: what the program sees as argv (includes name as typed)
             subprocess.run(
                 command_parts,
                 executable=executable_path
@@ -189,65 +169,50 @@ def execute_external_command(command_parts, path_directories):
 
 
 def parse_command(command_string):
-    """Parse command with proper quote handling."""
+    """Parse command with proper quote and escape handling."""
     parts = parse_command_with_quotes(command_string.strip())
-
+    
     if not parts:
         return None, None
-
+    
     return parts[0], parts[1:]
 
 
 def main():
     """Main shell loop."""
-
-    # Define built-in commands (using a set for O(1) lookup)
+    
     BUILTIN_COMMANDS = {"echo", "type", "exit", "pwd", "cd"}
-
-    # Get PATH environment variable and split into directories
+    
     path_env = os.environ.get("PATH", "")
     path_directories = path_env.split(os.pathsep)
-
-    # Main REPL (Read-Eval-Print Loop)
+    
     while True:
-        # Display prompt
         sys.stdout.write("$ ")
-        sys.stdout.flush()  # Ensure prompt is displayed immediately
-
-        # Read user input
+        sys.stdout.flush()
+        
         try:
             user_input = input()
         except EOFError:
-            # Handle Ctrl+D gracefully
             print()
             break
-
-        # Parse the command
+        
         command_name, arguments = parse_command(user_input)
-
-        # Skip empty commands
+        
         if command_name is None:
             continue
-
-        # Execute built-in commands
+        
         if command_name == "exit":
             should_exit = handle_exit_command(arguments)
             if should_exit:
                 break
-
         elif command_name == "echo":
             handle_echo_command(arguments)
-
         elif command_name == "pwd":
             handle_pwd_command(arguments)
-
         elif command_name == "cd":
             handle_cd_command(arguments)
-
         elif command_name == "type":
             handle_type_command(arguments, BUILTIN_COMMANDS, path_directories)
-
-        # Execute external commands
         else:
             execute_external_command([command_name] + arguments, path_directories)
 
