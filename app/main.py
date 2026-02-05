@@ -8,20 +8,9 @@ def parse_command_with_quotes(command_string):
     Parse command string, handling:
     - Single quotes (everything literal)
     - Double quotes (backslash escapes \ and " only)
-    - Backslash escaping ONLY outside quotes
+    - Backslash escaping outside quotes
     
-    Backslash rules:
-    - Outside quotes: escape next character
-    - Inside single quotes: backslash is literal
-    - Inside double quotes: backslash escapes only \ and "
-    
-    Examples:
-        "my program" arg1 → ["my program", "arg1"]
-        'exe with spaces' file.txt → ["exe with spaces", "file.txt"]
-        "exe with \'single quotes\'" → ["exe with 'single quotes'"]
-        echo three\ \ \ spaces → ["echo", "three   spaces"]
-        echo "world'test'\\'shell" → ["echo", "world'test'\'shell"]
-        echo "test\\nexample" → ["echo", "test\nexample"]
+    This does NOT handle redirection operators - that's done separately.
     """
     arguments = []
     current_argument = ""
@@ -39,7 +28,7 @@ def parse_command_with_quotes(command_string):
                     # Not a valid escape sequence - keep the backslash
                     current_argument += '\\' + char
             else:
-                # Outside quotes or in single quotes: add character as-is
+                # Outside quotes: add character as-is
                 current_argument += char
             escape_next = False
             continue
@@ -91,11 +80,9 @@ def parse_command_with_quotes(command_string):
         # STEP 6: Regular characters
         current_argument += char
     
-    # Don't forget the last argument (also handle dangling backslash)
-    if escape_next:
-        # Trailing backslash outside quotes
-        if quote_state != 'DOUBLE':
-            current_argument += '\\'
+    # Handle trailing backslash
+    if escape_next and quote_state != 'DOUBLE':
+        current_argument += '\\'
     
     if current_argument:
         arguments.append(current_argument)
@@ -103,19 +90,89 @@ def parse_command_with_quotes(command_string):
     return arguments
 
 
-def find_executable_in_path(command_name, path_directories):
+def split_redirections(tokens):
     """
-    Search for an executable command in the PATH directories.
+    Split tokens that contain redirection operators.
     
-    Handles executable names with spaces, quotes, and special characters.
+    Example:
+        ["echo", "hello>file"] → ["echo", "hello", ">", "file"]
+        ["ls", "1>out"] → ["ls", "1>", "out"]
+    """
+    result = []
     
-    Args:
-        command_name: Name of the command to find (e.g., 'ls', 'my program')
-        path_directories: List of directories to search
+    for token in tokens:
+        # Check for 1> first (longer match)
+        if '1>' in token:
+            idx = token.index('1>')
+            before = token[:idx]
+            after = token[idx + 2:]
+            
+            if before:
+                result.append(before)
+            result.append('1>')
+            if after:
+                result.append(after)
         
-    Returns:
-        Full path to the executable if found, None otherwise
+        # Check for >
+        elif '>' in token:
+            idx = token.index('>')
+            before = token[:idx]
+            after = token[idx + 1:]
+            
+            if before:
+                result.append(before)
+            result.append('>')
+            if after:
+                result.append(after)
+        
+        else:
+            result.append(token)
+    
+    return result
+
+
+def parse_command_with_redirection(command_string):
     """
+    Parse command and extract redirection information.
+    
+    Returns:
+        (command_tokens, output_file) where:
+        - command_tokens: list of command and arguments
+        - output_file: filename to redirect to, or None
+    """
+    # First, parse quotes normally
+    tokens = parse_command_with_quotes(command_string.strip())
+    
+    if not tokens:
+        return [], None
+    
+    # Split any tokens containing redirection operators
+    tokens = split_redirections(tokens)
+    
+    # Look for redirection operators
+    output_file = None
+    
+    # Check for > or 1> (they work the same way)
+    for i, token in enumerate(tokens):
+        if token in ('>', '1>'):
+            # Everything before is the command
+            command_tokens = tokens[:i]
+            
+            # Next token is the output file
+            if i + 1 < len(tokens):
+                output_file = tokens[i + 1]
+            
+            # For this stage, ignore anything after the filename
+            break
+    else:
+        # No redirection found
+        command_tokens = tokens
+    
+    return command_tokens, output_file
+
+
+def find_executable_in_path(command_name, path_directories):
+    """Search for an executable command in the PATH directories."""
     for directory in path_directories:
         full_path = os.path.join(directory, command_name)
         if os.path.isfile(full_path) and os.access(full_path, os.X_OK):
@@ -123,25 +180,42 @@ def find_executable_in_path(command_name, path_directories):
     return None
 
 
-def handle_exit_command(args):
+def handle_exit_command(args, output_file=None):
     """Handle the 'exit' command."""
     return True
 
 
-def handle_echo_command(args):
-    """Handle the 'echo' command - prints arguments to stdout."""
-    if args:
-        print(' '.join(args))
+def handle_echo_command(args, output_file=None):
+    """Handle the 'echo' command - prints arguments to stdout or file."""
+    output = ' '.join(args) if args else ''
+    
+    if output_file:
+        # Redirect to file
+        try:
+            with open(output_file, 'w') as f:
+                f.write(output + '\n')
+        except Exception as e:
+            print(f"bash: {output_file}: {e}", file=sys.stderr)
     else:
-        print()
+        # Print to stdout
+        print(output)
 
 
-def handle_pwd_command(args):
+def handle_pwd_command(args, output_file=None):
     """Handle the 'pwd' command - prints current working directory."""
-    print(os.getcwd())
+    output = os.getcwd()
+    
+    if output_file:
+        try:
+            with open(output_file, 'w') as f:
+                f.write(output + '\n')
+        except Exception as e:
+            print(f"bash: {output_file}: {e}", file=sys.stderr)
+    else:
+        print(output)
 
 
-def handle_cd_command(args):
+def handle_cd_command(args, output_file=None):
     """Handle the 'cd' command - changes current working directory."""
     if not args:
         target_directory = os.path.expanduser("~")
@@ -163,7 +237,7 @@ def handle_cd_command(args):
         print(f"cd: {args[0]}: Permission denied")
 
 
-def handle_type_command(args, builtin_commands, path_directories):
+def handle_type_command(args, builtin_commands, path_directories, output_file=None):
     """Handle the 'type' command - shows what kind of command something is."""
     if not args:
         print("type: missing argument")
@@ -172,58 +246,51 @@ def handle_type_command(args, builtin_commands, path_directories):
     command_name = args[0]
     
     if command_name in builtin_commands:
-        print(f"{command_name} is a shell builtin")
+        output = f"{command_name} is a shell builtin"
     else:
         executable_path = find_executable_in_path(command_name, path_directories)
         if executable_path:
-            print(f"{command_name} is {executable_path}")
+            output = f"{command_name} is {executable_path}"
         else:
-            print(f"{command_name}: not found")
+            output = f"{command_name}: not found"
+    
+    if output_file:
+        try:
+            with open(output_file, 'w') as f:
+                f.write(output + '\n')
+        except Exception as e:
+            print(f"bash: {output_file}: {e}", file=sys.stderr)
+    else:
+        print(output)
 
 
-def execute_external_command(command_parts, path_directories):
-    """
-    Execute an external command (not a shell built-in).
-    
-    Handles executables with spaces, quotes, and special characters in their names.
-    
-    Args:
-        command_parts: List of command and its arguments
-        path_directories: List of PATH directories to search
-    """
+def execute_external_command(command_parts, path_directories, output_file=None):
+    """Execute an external command (not a shell built-in)."""
     command_name = command_parts[0]
     
-    # Find the executable in PATH
-    # The command_name has already been unquoted by parse_command_with_quotes
     executable_path = find_executable_in_path(command_name, path_directories)
     
     if executable_path:
         try:
-            # Execute the program:
-            # - executable: the full path where the program actually is
-            # - command_parts: what the program sees as argv (includes name as typed)
-            subprocess.run(
-                command_parts,
-                executable=executable_path
-            )
+            if output_file:
+                # Redirect stdout to file
+                with open(output_file, 'w') as f:
+                    subprocess.run(
+                        command_parts,
+                        executable=executable_path,
+                        stdout=f  # Redirect stdout only
+                        # stderr still goes to terminal
+                    )
+            else:
+                # Normal execution
+                subprocess.run(
+                    command_parts,
+                    executable=executable_path
+                )
         except Exception as e:
             print(f"Error executing {command_name}: {e}")
     else:
         print(f"{command_name}: command not found")
-
-
-def parse_command(command_string):
-    """
-    Parse command with proper quote and escape handling.
-    
-    This works for both quoted executables and quoted arguments.
-    """
-    parts = parse_command_with_quotes(command_string.strip())
-    
-    if not parts:
-        return None, None
-    
-    return parts[0], parts[1:]
 
 
 def main():
@@ -244,25 +311,31 @@ def main():
             print()
             break
         
-        command_name, arguments = parse_command(user_input)
+        # Parse command and check for redirection
+        command_tokens, output_file = parse_command_with_redirection(user_input)
         
-        if command_name is None:
+        if not command_tokens:
             continue
         
+        command_name = command_tokens[0]
+        arguments = command_tokens[1:]
+        
+        # Execute built-in commands
         if command_name == "exit":
-            should_exit = handle_exit_command(arguments)
+            should_exit = handle_exit_command(arguments, output_file)
             if should_exit:
                 break
         elif command_name == "echo":
-            handle_echo_command(arguments)
+            handle_echo_command(arguments, output_file)
         elif command_name == "pwd":
-            handle_pwd_command(arguments)
+            handle_pwd_command(arguments, output_file)
         elif command_name == "cd":
-            handle_cd_command(arguments)
+            handle_cd_command(arguments, output_file)
         elif command_name == "type":
-            handle_type_command(arguments, BUILTIN_COMMANDS, path_directories)
+            handle_type_command(arguments, BUILTIN_COMMANDS, path_directories, output_file)
         else:
-            execute_external_command([command_name] + arguments, path_directories)
+            # Execute external commands
+            execute_external_command(command_tokens, path_directories, output_file)
 
 
 if __name__ == "__main__":
