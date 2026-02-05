@@ -95,15 +95,51 @@ def split_redirections(tokens):
     Split tokens that contain redirection operators.
     
     Example:
-        ["echo", "hello>file"] → ["echo", "hello", ">", "file"]
-        ["ls", "1>out"] → ["ls", "1>", "out"]
-        ["cat", "file", "2>err"] → ["cat", "file", "2>", "err"]
+        ["echo", "hello>>file"] → ["echo", "hello", ">>", "file"]
+        ["ls", "1>>out"] → ["ls", "1>>", "out"]
+        ["cat", "file", "2>>err"] → ["cat", "file", "2>>", "err"]
     """
     result = []
     
     for token in tokens:
-        # Check for 2> first
-        if '2>' in token:
+        # Check for 2>> first (before 2>)
+        if '2>>' in token:
+            idx = token.index('2>>')
+            before = token[:idx]
+            after = token[idx + 3:]
+            
+            if before:
+                result.append(before)
+            result.append('2>>')
+            if after:
+                result.append(after)
+        
+        # Check for 1>> (before 1>)
+        elif '1>>' in token:
+            idx = token.index('1>>')
+            before = token[:idx]
+            after = token[idx + 3:]
+            
+            if before:
+                result.append(before)
+            result.append('1>>')
+            if after:
+                result.append(after)
+        
+        # Check for >> (before >)
+        elif '>>' in token:
+            idx = token.index('>>')
+            before = token[:idx]
+            after = token[idx + 2:]
+            
+            if before:
+                result.append(before)
+            result.append('>>')
+            if after:
+                result.append(after)
+        
+        # Check for 2>
+        elif '2>' in token:
             idx = token.index('2>')
             before = token[:idx]
             after = token[idx + 2:]
@@ -149,23 +185,27 @@ def parse_command_with_redirection(command_string):
     Parse command and extract redirection information.
     
     Returns:
-        (command_tokens, stdout_file, stderr_file) where:
+        (command_tokens, stdout_file, stdout_append, stderr_file, stderr_append) where:
         - command_tokens: list of command and arguments
         - stdout_file: filename to redirect stdout to, or None
+        - stdout_append: True if appending (>>), False if overwriting (>)
         - stderr_file: filename to redirect stderr to, or None
+        - stderr_append: True if appending (2>>), False if overwriting (2>)
     """
     # First, parse quotes normally
     tokens = parse_command_with_quotes(command_string.strip())
     
     if not tokens:
-        return [], None, None
+        return [], None, False, None, False
     
     # Split any tokens containing redirection operators
     tokens = split_redirections(tokens)
     
     # Track redirection targets
     stdout_file = None
+    stdout_append = False
     stderr_file = None
+    stderr_append = False
     
     # Find and remove redirection operators and their targets
     i = 0
@@ -174,19 +214,39 @@ def parse_command_with_redirection(command_string):
     while i < len(tokens):
         token = tokens[i]
         
-        if token in ('>', '1>'):
-            # Redirect stdout
+        if token in ('>>', '1>>'):
+            # Append stdout
             if i + 1 < len(tokens):
                 stdout_file = tokens[i + 1]
-                i += 2  # Skip both operator and filename
+                stdout_append = True
+                i += 2
+            else:
+                i += 1
+        
+        elif token in ('>', '1>'):
+            # Overwrite stdout
+            if i + 1 < len(tokens):
+                stdout_file = tokens[i + 1]
+                stdout_append = False
+                i += 2
+            else:
+                i += 1
+        
+        elif token == '2>>':
+            # Append stderr
+            if i + 1 < len(tokens):
+                stderr_file = tokens[i + 1]
+                stderr_append = True
+                i += 2
             else:
                 i += 1
         
         elif token == '2>':
-            # Redirect stderr
+            # Overwrite stderr
             if i + 1 < len(tokens):
                 stderr_file = tokens[i + 1]
-                i += 2  # Skip both operator and filename
+                stderr_append = False
+                i += 2
             else:
                 i += 1
         
@@ -195,7 +255,7 @@ def parse_command_with_redirection(command_string):
             command_tokens.append(token)
             i += 1
     
-    return command_tokens, stdout_file, stderr_file
+    return command_tokens, stdout_file, stdout_append, stderr_file, stderr_append
 
 
 def find_executable_in_path(command_name, path_directories):
@@ -207,39 +267,43 @@ def find_executable_in_path(command_name, path_directories):
     return None
 
 
-def handle_exit_command(args, stdout_file=None, stderr_file=None):
+def handle_exit_command(args, stdout_file=None, stdout_append=False, stderr_file=None, stderr_append=False):
     """Handle the 'exit' command."""
     # Create stderr file if specified (even if empty)
     if stderr_file:
         try:
-            open(stderr_file, 'w').close()
+            mode = 'a' if stderr_append else 'w'
+            open(stderr_file, mode).close()
         except:
             pass
     
     return True
 
 
-def handle_echo_command(args, stdout_file=None, stderr_file=None):
+def handle_echo_command(args, stdout_file=None, stdout_append=False, stderr_file=None, stderr_append=False):
     """Handle the 'echo' command - prints arguments to stdout or file."""
     output = ' '.join(args) if args else ''
     
     # Create stderr file if specified (even if empty)
     if stderr_file:
         try:
-            open(stderr_file, 'w').close()
+            mode = 'a' if stderr_append else 'w'
+            open(stderr_file, mode).close()
         except:
             pass
     
     if stdout_file:
         # Redirect stdout to file
         try:
-            with open(stdout_file, 'w') as f:
+            mode = 'a' if stdout_append else 'w'
+            with open(stdout_file, mode) as f:
                 f.write(output + '\n')
         except Exception as e:
             # Error opening file - write to stderr
             if stderr_file:
                 try:
-                    with open(stderr_file, 'w') as f:
+                    mode = 'a' if stderr_append else 'w'
+                    with open(stderr_file, mode) as f:
                         f.write(f"bash: {stdout_file}: {e}\n")
                 except:
                     print(f"bash: {stdout_file}: {e}", file=sys.stderr)
@@ -250,25 +314,28 @@ def handle_echo_command(args, stdout_file=None, stderr_file=None):
         print(output)
 
 
-def handle_pwd_command(args, stdout_file=None, stderr_file=None):
+def handle_pwd_command(args, stdout_file=None, stdout_append=False, stderr_file=None, stderr_append=False):
     """Handle the 'pwd' command - prints current working directory."""
     output = os.getcwd()
     
     # Create stderr file if specified (even if empty)
     if stderr_file:
         try:
-            open(stderr_file, 'w').close()
+            mode = 'a' if stderr_append else 'w'
+            open(stderr_file, mode).close()
         except:
             pass
     
     if stdout_file:
         try:
-            with open(stdout_file, 'w') as f:
+            mode = 'a' if stdout_append else 'w'
+            with open(stdout_file, mode) as f:
                 f.write(output + '\n')
         except Exception as e:
             if stderr_file:
                 try:
-                    with open(stderr_file, 'w') as f:
+                    mode = 'a' if stderr_append else 'w'
+                    with open(stderr_file, mode) as f:
                         f.write(f"bash: {stdout_file}: {e}\n")
                 except:
                     print(f"bash: {stdout_file}: {e}", file=sys.stderr)
@@ -278,13 +345,13 @@ def handle_pwd_command(args, stdout_file=None, stderr_file=None):
         print(output)
 
 
-def handle_cd_command(args, stdout_file=None, stderr_file=None):
+def handle_cd_command(args, stdout_file=None, stdout_append=False, stderr_file=None, stderr_append=False):
     """Handle the 'cd' command - changes current working directory."""
-    # Create stderr file if specified (even if empty initially)
+    # Create/open stderr file if specified
     if stderr_file:
         try:
-            # Pre-create the file
-            stderr_handle = open(stderr_file, 'w')
+            mode = 'a' if stderr_append else 'w'
+            stderr_handle = open(stderr_file, mode)
         except:
             stderr_handle = None
     else:
@@ -325,12 +392,13 @@ def handle_cd_command(args, stdout_file=None, stderr_file=None):
         stderr_handle.close()
 
 
-def handle_type_command(args, builtin_commands, path_directories, stdout_file=None, stderr_file=None):
+def handle_type_command(args, builtin_commands, path_directories, stdout_file=None, stdout_append=False, stderr_file=None, stderr_append=False):
     """Handle the 'type' command - shows what kind of command something is."""
-    # Create stderr file if specified (even if empty initially)
+    # Create/open stderr file if specified
     if stderr_file:
         try:
-            stderr_handle = open(stderr_file, 'w')
+            mode = 'a' if stderr_append else 'w'
+            stderr_handle = open(stderr_file, mode)
         except:
             stderr_handle = None
     else:
@@ -360,7 +428,8 @@ def handle_type_command(args, builtin_commands, path_directories, stdout_file=No
     
     if stdout_file:
         try:
-            with open(stdout_file, 'w') as f:
+            mode = 'a' if stdout_append else 'w'
+            with open(stdout_file, mode) as f:
                 f.write(output + '\n')
         except Exception as e:
             error_msg = f"bash: {stdout_file}: {e}\n"
@@ -375,7 +444,7 @@ def handle_type_command(args, builtin_commands, path_directories, stdout_file=No
         stderr_handle.close()
 
 
-def execute_external_command(command_parts, path_directories, stdout_file=None, stderr_file=None):
+def execute_external_command(command_parts, path_directories, stdout_file=None, stdout_append=False, stderr_file=None, stderr_append=False):
     """Execute an external command (not a shell built-in)."""
     command_name = command_parts[0]
     
@@ -388,17 +457,19 @@ def execute_external_command(command_parts, path_directories, stdout_file=None, 
             stderr_handle = None
             
             if stdout_file:
-                stdout_handle = open(stdout_file, 'w')
+                mode = 'a' if stdout_append else 'w'
+                stdout_handle = open(stdout_file, mode)
             
             if stderr_file:
-                stderr_handle = open(stderr_file, 'w')
+                mode = 'a' if stderr_append else 'w'
+                stderr_handle = open(stderr_file, mode)
             
             # Execute with appropriate redirections
             subprocess.run(
                 command_parts,
                 executable=executable_path,
-                stdout=stdout_handle,  # None means terminal
-                stderr=stderr_handle   # None means terminal
+                stdout=stdout_handle,
+                stderr=stderr_handle
             )
             
             # Close file handles
@@ -411,7 +482,8 @@ def execute_external_command(command_parts, path_directories, stdout_file=None, 
             error_msg = f"Error executing {command_name}: {e}\n"
             if stderr_file:
                 try:
-                    with open(stderr_file, 'w') as f:
+                    mode = 'a' if stderr_append else 'w'
+                    with open(stderr_file, mode) as f:
                         f.write(error_msg)
                 except:
                     print(error_msg.rstrip())
@@ -421,7 +493,8 @@ def execute_external_command(command_parts, path_directories, stdout_file=None, 
         error_msg = f"{command_name}: command not found\n"
         if stderr_file:
             try:
-                with open(stderr_file, 'w') as f:
+                mode = 'a' if stderr_append else 'w'
+                with open(stderr_file, mode) as f:
                     f.write(error_msg)
             except:
                 print(error_msg.rstrip())
@@ -448,7 +521,7 @@ def main():
             break
         
         # Parse command and check for redirection
-        command_tokens, stdout_file, stderr_file = parse_command_with_redirection(user_input)
+        command_tokens, stdout_file, stdout_append, stderr_file, stderr_append = parse_command_with_redirection(user_input)
         
         if not command_tokens:
             continue
@@ -458,20 +531,20 @@ def main():
         
         # Execute built-in commands
         if command_name == "exit":
-            should_exit = handle_exit_command(arguments, stdout_file, stderr_file)
+            should_exit = handle_exit_command(arguments, stdout_file, stdout_append, stderr_file, stderr_append)
             if should_exit:
                 break
         elif command_name == "echo":
-            handle_echo_command(arguments, stdout_file, stderr_file)
+            handle_echo_command(arguments, stdout_file, stdout_append, stderr_file, stderr_append)
         elif command_name == "pwd":
-            handle_pwd_command(arguments, stdout_file, stderr_file)
+            handle_pwd_command(arguments, stdout_file, stdout_append, stderr_file, stderr_append)
         elif command_name == "cd":
-            handle_cd_command(arguments, stdout_file, stderr_file)
+            handle_cd_command(arguments, stdout_file, stdout_append, stderr_file, stderr_append)
         elif command_name == "type":
-            handle_type_command(arguments, BUILTIN_COMMANDS, path_directories, stdout_file, stderr_file)
+            handle_type_command(arguments, BUILTIN_COMMANDS, path_directories, stdout_file, stdout_append, stderr_file, stderr_append)
         else:
             # Execute external commands
-            execute_external_command(command_tokens, path_directories, stdout_file, stderr_file)
+            execute_external_command(command_tokens, path_directories, stdout_file, stdout_append, stderr_file, stderr_append)
 
 
 if __name__ == "__main__":
