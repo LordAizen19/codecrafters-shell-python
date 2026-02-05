@@ -209,6 +209,13 @@ def find_executable_in_path(command_name, path_directories):
 
 def handle_exit_command(args, stdout_file=None, stderr_file=None):
     """Handle the 'exit' command."""
+    # Create stderr file if specified (even if empty)
+    if stderr_file:
+        try:
+            open(stderr_file, 'w').close()
+        except:
+            pass
+    
     return True
 
 
@@ -216,24 +223,30 @@ def handle_echo_command(args, stdout_file=None, stderr_file=None):
     """Handle the 'echo' command - prints arguments to stdout or file."""
     output = ' '.join(args) if args else ''
     
+    # Create stderr file if specified (even if empty)
+    if stderr_file:
+        try:
+            open(stderr_file, 'w').close()
+        except:
+            pass
+    
     if stdout_file:
-        # Redirect to file
+        # Redirect stdout to file
         try:
             with open(stdout_file, 'w') as f:
                 f.write(output + '\n')
         except Exception as e:
-            # Error opening file goes to stderr
-            error_target = sys.stderr
+            # Error opening file - write to stderr
             if stderr_file:
                 try:
-                    error_target = open(stderr_file, 'w')
+                    with open(stderr_file, 'w') as f:
+                        f.write(f"bash: {stdout_file}: {e}\n")
                 except:
-                    pass
-            print(f"bash: {stdout_file}: {e}", file=error_target)
-            if stderr_file and error_target != sys.stderr:
-                error_target.close()
+                    print(f"bash: {stdout_file}: {e}", file=sys.stderr)
+            else:
+                print(f"bash: {stdout_file}: {e}", file=sys.stderr)
     else:
-        # Print to stdout
+        # Print to stdout (terminal)
         print(output)
 
 
@@ -241,26 +254,42 @@ def handle_pwd_command(args, stdout_file=None, stderr_file=None):
     """Handle the 'pwd' command - prints current working directory."""
     output = os.getcwd()
     
+    # Create stderr file if specified (even if empty)
+    if stderr_file:
+        try:
+            open(stderr_file, 'w').close()
+        except:
+            pass
+    
     if stdout_file:
         try:
             with open(stdout_file, 'w') as f:
                 f.write(output + '\n')
         except Exception as e:
-            error_target = sys.stderr
             if stderr_file:
                 try:
-                    error_target = open(stderr_file, 'w')
+                    with open(stderr_file, 'w') as f:
+                        f.write(f"bash: {stdout_file}: {e}\n")
                 except:
-                    pass
-            print(f"bash: {stdout_file}: {e}", file=error_target)
-            if stderr_file and error_target != sys.stderr:
-                error_target.close()
+                    print(f"bash: {stdout_file}: {e}", file=sys.stderr)
+            else:
+                print(f"bash: {stdout_file}: {e}", file=sys.stderr)
     else:
         print(output)
 
 
 def handle_cd_command(args, stdout_file=None, stderr_file=None):
     """Handle the 'cd' command - changes current working directory."""
+    # Create stderr file if specified (even if empty initially)
+    if stderr_file:
+        try:
+            # Pre-create the file
+            stderr_handle = open(stderr_file, 'w')
+        except:
+            stderr_handle = None
+    else:
+        stderr_handle = None
+    
     if not args:
         target_directory = os.path.expanduser("~")
     else:
@@ -274,49 +303,48 @@ def handle_cd_command(args, stdout_file=None, stderr_file=None):
     try:
         os.chdir(target_directory)
     except FileNotFoundError:
-        error_msg = f"cd: {args[0]}: No such file or directory"
-        if stderr_file:
-            try:
-                with open(stderr_file, 'w') as f:
-                    f.write(error_msg + '\n')
-            except:
-                print(error_msg)
+        error_msg = f"cd: {args[0]}: No such file or directory\n"
+        if stderr_handle:
+            stderr_handle.write(error_msg)
         else:
-            print(error_msg)
+            print(error_msg.rstrip())
     except NotADirectoryError:
-        error_msg = f"cd: {args[0]}: Not a directory"
-        if stderr_file:
-            try:
-                with open(stderr_file, 'w') as f:
-                    f.write(error_msg + '\n')
-            except:
-                print(error_msg)
+        error_msg = f"cd: {args[0]}: Not a directory\n"
+        if stderr_handle:
+            stderr_handle.write(error_msg)
         else:
-            print(error_msg)
+            print(error_msg.rstrip())
     except PermissionError:
-        error_msg = f"cd: {args[0]}: Permission denied"
-        if stderr_file:
-            try:
-                with open(stderr_file, 'w') as f:
-                    f.write(error_msg + '\n')
-            except:
-                print(error_msg)
+        error_msg = f"cd: {args[0]}: Permission denied\n"
+        if stderr_handle:
+            stderr_handle.write(error_msg)
         else:
-            print(error_msg)
+            print(error_msg.rstrip())
+    
+    if stderr_handle:
+        stderr_handle.close()
 
 
 def handle_type_command(args, builtin_commands, path_directories, stdout_file=None, stderr_file=None):
     """Handle the 'type' command - shows what kind of command something is."""
+    # Create stderr file if specified (even if empty initially)
+    if stderr_file:
+        try:
+            stderr_handle = open(stderr_file, 'w')
+        except:
+            stderr_handle = None
+    else:
+        stderr_handle = None
+    
     if not args:
-        error_msg = "type: missing argument"
-        if stderr_file:
-            try:
-                with open(stderr_file, 'w') as f:
-                    f.write(error_msg + '\n')
-            except:
-                print(error_msg)
+        error_msg = "type: missing argument\n"
+        if stderr_handle:
+            stderr_handle.write(error_msg)
         else:
-            print(error_msg)
+            print(error_msg.rstrip())
+        
+        if stderr_handle:
+            stderr_handle.close()
         return
     
     command_name = args[0]
@@ -335,17 +363,16 @@ def handle_type_command(args, builtin_commands, path_directories, stdout_file=No
             with open(stdout_file, 'w') as f:
                 f.write(output + '\n')
         except Exception as e:
-            error_target = sys.stderr
-            if stderr_file:
-                try:
-                    error_target = open(stderr_file, 'w')
-                except:
-                    pass
-            print(f"bash: {stdout_file}: {e}", file=error_target)
-            if stderr_file and error_target != sys.stderr:
-                error_target.close()
+            error_msg = f"bash: {stdout_file}: {e}\n"
+            if stderr_handle:
+                stderr_handle.write(error_msg)
+            else:
+                print(error_msg.rstrip(), file=sys.stderr)
     else:
         print(output)
+    
+    if stderr_handle:
+        stderr_handle.close()
 
 
 def execute_external_command(command_parts, path_directories, stdout_file=None, stderr_file=None):
@@ -381,25 +408,25 @@ def execute_external_command(command_parts, path_directories, stdout_file=None, 
                 stderr_handle.close()
                 
         except Exception as e:
-            error_msg = f"Error executing {command_name}: {e}"
+            error_msg = f"Error executing {command_name}: {e}\n"
             if stderr_file:
                 try:
                     with open(stderr_file, 'w') as f:
-                        f.write(error_msg + '\n')
+                        f.write(error_msg)
                 except:
-                    print(error_msg)
+                    print(error_msg.rstrip())
             else:
-                print(error_msg)
+                print(error_msg.rstrip())
     else:
-        error_msg = f"{command_name}: command not found"
+        error_msg = f"{command_name}: command not found\n"
         if stderr_file:
             try:
                 with open(stderr_file, 'w') as f:
-                    f.write(error_msg + '\n')
+                    f.write(error_msg)
             except:
-                print(error_msg)
+                print(error_msg.rstrip())
         else:
-            print(error_msg)
+            print(error_msg.rstrip())
 
 
 def main():
