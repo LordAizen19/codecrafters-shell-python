@@ -143,11 +143,11 @@ def split_redirections(tokens):
             result.append('2>')
             if after:
                 result.append(after)
-        # Check for 1> (THIS WAS THE BUG)
+        # Check for 1>
         elif '1>' in token:
-            idx = token.index('1>')  # ✓ FIXED: was '1>>' 
+            idx = token.index('1>')
             before = token[:idx]
-            after = token[idx + 2:]  # ✓ Length of '1>' is 2
+            after = token[idx + 2:]
             if before:
                 result.append(before)
             result.append('1>')
@@ -503,6 +503,11 @@ BUILTIN_COMMANDS = ["echo", "exit", "pwd", "cd", "type"]
 PATH_DIRECTORIES = []
 EXECUTABLES_CACHE = set()
 
+# Track tab completion state
+last_completion_text = None
+last_completion_options = []
+tab_press_count = 0
+
 
 def update_executables_cache():
     """Update the cache of available executables."""
@@ -515,6 +520,7 @@ def completer(text, state):
     Tab completion function for readline.
     
     Completes both builtin commands and executables in PATH.
+    Handles multiple matches with bell on first press and list on second press.
     
     Args:
         text: The text to complete
@@ -523,27 +529,72 @@ def completer(text, state):
     Returns:
         The completion string, or None if no more completions
     """
+    global last_completion_text, last_completion_options, tab_press_count
+    
     # Get the current line buffer
     line = readline.get_line_buffer()
     
     # Only complete if we're at the beginning of the line (completing the command)
     # This means the text should be the first word
     if line.lstrip() == text:
-        # Combine builtins and executables
-        all_commands = set(BUILTIN_COMMANDS) | EXECUTABLES_CACHE
-        
-        # Find all commands that start with the given text
-        options = sorted([cmd for cmd in all_commands if cmd.startswith(text)])
-        
-        # Return the completion at the given state index
-        if state < len(options):
-            # Add a space after the completion
-            return options[state] + ' '
-        else:
-            # Ring the bell when no more completions
-            if state == 0 and not options:
+        # When state is 0, this is a new completion request
+        if state == 0:
+            # Combine builtins and executables
+            all_commands = set(BUILTIN_COMMANDS) | EXECUTABLES_CACHE
+            
+            # Find all commands that start with the given text
+            options = sorted([cmd for cmd in all_commands if cmd.startswith(text)])
+            
+            # Check if this is a new completion or continuation of previous
+            if text != last_completion_text:
+                # New completion
+                last_completion_text = text
+                last_completion_options = options
+                tab_press_count = 1
+            else:
+                # Same text - increment tab press count
+                tab_press_count += 1
+            
+            # Handle different cases based on number of matches
+            if len(options) == 0:
+                # No matches - ring bell
                 sys.stdout.write('\a')
                 sys.stdout.flush()
+                return None
+            elif len(options) == 1:
+                # Single match - complete it with a space
+                return options[0] + ' '
+            else:
+                # Multiple matches
+                if tab_press_count == 1:
+                    # First tab - ring bell and return None to show we have multiple matches
+                    sys.stdout.write('\a')
+                    sys.stdout.flush()
+                    return None
+                elif tab_press_count == 2:
+                    # Second tab - display all options
+                    # Print newline, then options separated by two spaces
+                    print()
+                    print('  '.join(options))
+                    # Redisplay the prompt and current input
+                    sys.stdout.write("$ " + text)
+                    sys.stdout.flush()
+                    return None
+                else:
+                    # Third+ tab - ring bell again
+                    sys.stdout.write('\a')
+                    sys.stdout.flush()
+                    return None
+        else:
+            # state > 0 means readline is asking for additional completions
+            # We don't provide multiple completion options - we handle it manually
+            return None
+    else:
+        # Not at the beginning - reset state
+        last_completion_text = None
+        last_completion_options = []
+        tab_press_count = 0
+        return None
     
     return None
 
@@ -562,7 +613,7 @@ def setup_readline():
 
 def main():
     """Main shell loop."""
-    global PATH_DIRECTORIES
+    global PATH_DIRECTORIES, last_completion_text, tab_press_count
     
     # Get PATH directories
     path_env = os.environ.get("PATH", "")
@@ -577,6 +628,10 @@ def main():
     BUILTIN_COMMANDS_SET = {"echo", "type", "exit", "pwd", "cd"}
     
     while True:
+        # Reset tab completion state at each new prompt
+        last_completion_text = None
+        tab_press_count = 0
+        
         sys.stdout.write("$ ")
         sys.stdout.flush()
         
