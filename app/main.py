@@ -1,6 +1,7 @@
 import sys
 import os
 import subprocess
+import readline
 
 
 def parse_command_with_quotes(command_string):
@@ -91,14 +92,7 @@ def parse_command_with_quotes(command_string):
 
 
 def split_redirections(tokens):
-    """
-    Split tokens that contain redirection operators.
-    
-    Example:
-        ["echo", "hello>>file"] → ["echo", "hello", ">>", "file"]
-        ["ls", "1>>out"] → ["ls", "1>>", "out"]
-        ["cat", "file", "2>>err"] → ["cat", "file", "2>>", "err"]
-    """
+    """Split tokens that contain redirection operators."""
     result = []
     
     for token in tokens:
@@ -107,73 +101,61 @@ def split_redirections(tokens):
             idx = token.index('2>>')
             before = token[:idx]
             after = token[idx + 3:]
-            
             if before:
                 result.append(before)
             result.append('2>>')
             if after:
                 result.append(after)
-        
         # Check for 1>> (before 1>)
         elif '1>>' in token:
             idx = token.index('1>>')
             before = token[:idx]
             after = token[idx + 3:]
-            
             if before:
                 result.append(before)
             result.append('1>>')
             if after:
                 result.append(after)
-        
         # Check for >> (before >)
         elif '>>' in token:
             idx = token.index('>>')
             before = token[:idx]
             after = token[idx + 2:]
-            
             if before:
                 result.append(before)
             result.append('>>')
             if after:
                 result.append(after)
-        
         # Check for 2>
         elif '2>' in token:
             idx = token.index('2>')
             before = token[:idx]
             after = token[idx + 2:]
-            
             if before:
                 result.append(before)
             result.append('2>')
             if after:
                 result.append(after)
-        
         # Check for 1>
         elif '1>' in token:
             idx = token.index('1>')
             before = token[:idx]
             after = token[idx + 2:]
-            
             if before:
                 result.append(before)
             result.append('1>')
             if after:
                 result.append(after)
-        
         # Check for >
         elif '>' in token:
             idx = token.index('>')
             before = token[:idx]
             after = token[idx + 1:]
-            
             if before:
                 result.append(before)
             result.append('>')
             if after:
                 result.append(after)
-        
         else:
             result.append(token)
     
@@ -181,33 +163,19 @@ def split_redirections(tokens):
 
 
 def parse_command_with_redirection(command_string):
-    """
-    Parse command and extract redirection information.
-    
-    Returns:
-        (command_tokens, stdout_file, stdout_append, stderr_file, stderr_append) where:
-        - command_tokens: list of command and arguments
-        - stdout_file: filename to redirect stdout to, or None
-        - stdout_append: True if appending (>>), False if overwriting (>)
-        - stderr_file: filename to redirect stderr to, or None
-        - stderr_append: True if appending (2>>), False if overwriting (2>)
-    """
-    # First, parse quotes normally
+    """Parse command and extract redirection information."""
     tokens = parse_command_with_quotes(command_string.strip())
     
     if not tokens:
         return [], None, False, None, False
     
-    # Split any tokens containing redirection operators
     tokens = split_redirections(tokens)
     
-    # Track redirection targets
     stdout_file = None
     stdout_append = False
     stderr_file = None
     stderr_append = False
     
-    # Find and remove redirection operators and their targets
     i = 0
     command_tokens = []
     
@@ -215,43 +183,34 @@ def parse_command_with_redirection(command_string):
         token = tokens[i]
         
         if token in ('>>', '1>>'):
-            # Append stdout
             if i + 1 < len(tokens):
                 stdout_file = tokens[i + 1]
                 stdout_append = True
                 i += 2
             else:
                 i += 1
-        
         elif token in ('>', '1>'):
-            # Overwrite stdout
             if i + 1 < len(tokens):
                 stdout_file = tokens[i + 1]
                 stdout_append = False
                 i += 2
             else:
                 i += 1
-        
         elif token == '2>>':
-            # Append stderr
             if i + 1 < len(tokens):
                 stderr_file = tokens[i + 1]
                 stderr_append = True
                 i += 2
             else:
                 i += 1
-        
         elif token == '2>':
-            # Overwrite stderr
             if i + 1 < len(tokens):
                 stderr_file = tokens[i + 1]
                 stderr_append = False
                 i += 2
             else:
                 i += 1
-        
         else:
-            # Regular token - part of the command
             command_tokens.append(token)
             i += 1
     
@@ -269,14 +228,12 @@ def find_executable_in_path(command_name, path_directories):
 
 def handle_exit_command(args, stdout_file=None, stdout_append=False, stderr_file=None, stderr_append=False):
     """Handle the 'exit' command."""
-    # Create stderr file if specified (even if empty)
     if stderr_file:
         try:
             mode = 'a' if stderr_append else 'w'
             open(stderr_file, mode).close()
         except:
             pass
-    
     return True
 
 
@@ -284,7 +241,6 @@ def handle_echo_command(args, stdout_file=None, stdout_append=False, stderr_file
     """Handle the 'echo' command - prints arguments to stdout or file."""
     output = ' '.join(args) if args else ''
     
-    # Create stderr file if specified (even if empty)
     if stderr_file:
         try:
             mode = 'a' if stderr_append else 'w'
@@ -293,13 +249,11 @@ def handle_echo_command(args, stdout_file=None, stdout_append=False, stderr_file
             pass
     
     if stdout_file:
-        # Redirect stdout to file
         try:
             mode = 'a' if stdout_append else 'w'
             with open(stdout_file, mode) as f:
                 f.write(output + '\n')
         except Exception as e:
-            # Error opening file - write to stderr
             if stderr_file:
                 try:
                     mode = 'a' if stderr_append else 'w'
@@ -310,7 +264,6 @@ def handle_echo_command(args, stdout_file=None, stdout_append=False, stderr_file
             else:
                 print(f"bash: {stdout_file}: {e}", file=sys.stderr)
     else:
-        # Print to stdout (terminal)
         print(output)
 
 
@@ -318,7 +271,6 @@ def handle_pwd_command(args, stdout_file=None, stdout_append=False, stderr_file=
     """Handle the 'pwd' command - prints current working directory."""
     output = os.getcwd()
     
-    # Create stderr file if specified (even if empty)
     if stderr_file:
         try:
             mode = 'a' if stderr_append else 'w'
@@ -347,7 +299,6 @@ def handle_pwd_command(args, stdout_file=None, stdout_append=False, stderr_file=
 
 def handle_cd_command(args, stdout_file=None, stdout_append=False, stderr_file=None, stderr_append=False):
     """Handle the 'cd' command - changes current working directory."""
-    # Create/open stderr file if specified
     if stderr_file:
         try:
             mode = 'a' if stderr_append else 'w'
@@ -394,7 +345,6 @@ def handle_cd_command(args, stdout_file=None, stdout_append=False, stderr_file=N
 
 def handle_type_command(args, builtin_commands, path_directories, stdout_file=None, stdout_append=False, stderr_file=None, stderr_append=False):
     """Handle the 'type' command - shows what kind of command something is."""
-    # Create/open stderr file if specified
     if stderr_file:
         try:
             mode = 'a' if stderr_append else 'w'
@@ -452,7 +402,6 @@ def execute_external_command(command_parts, path_directories, stdout_file=None, 
     
     if executable_path:
         try:
-            # Prepare file handles for redirection
             stdout_handle = None
             stderr_handle = None
             
@@ -464,7 +413,6 @@ def execute_external_command(command_parts, path_directories, stdout_file=None, 
                 mode = 'a' if stderr_append else 'w'
                 stderr_handle = open(stderr_file, mode)
             
-            # Execute with appropriate redirections
             subprocess.run(
                 command_parts,
                 executable=executable_path,
@@ -472,7 +420,6 @@ def execute_external_command(command_parts, path_directories, stdout_file=None, 
                 stderr=stderr_handle
             )
             
-            # Close file handles
             if stdout_handle:
                 stdout_handle.close()
             if stderr_handle:
@@ -502,8 +449,54 @@ def execute_external_command(command_parts, path_directories, stdout_file=None, 
             print(error_msg.rstrip())
 
 
+# Tab completion setup
+COMPLETABLE_COMMANDS = ['echo', 'exit']
+
+def completer(text, state):
+    """
+    Tab completion function for readline.
+    
+    Args:
+        text: The text to complete
+        state: The iteration state (0 for first call, 1 for second, etc.)
+    
+    Returns:
+        The completion string, or None if no more completions
+    """
+    # Get the current line buffer
+    line = readline.get_line_buffer()
+    
+    # Only complete if we're at the beginning of the line (completing the command)
+    # This means there's no space before the text we're completing
+    if line.lstrip() == text:
+        # Find all commands that start with the given text
+        options = [cmd for cmd in COMPLETABLE_COMMANDS if cmd.startswith(text)]
+        
+        # Return the completion at the given state index
+        if state < len(options):
+            # Add a space after the completion
+            return options[state] + ' '
+    
+    return None
+
+
+def setup_readline():
+    """Configure readline for tab completion."""
+    # Set the completer function
+    readline.set_completer(completer)
+    
+    # Set the completion key to TAB
+    readline.parse_and_bind('tab: complete')
+    
+    # Disable filename completion (we only want command completion)
+    readline.set_completer_delims(' \t\n')
+
+
 def main():
     """Main shell loop."""
+    
+    # Setup tab completion
+    setup_readline()
     
     BUILTIN_COMMANDS = {"echo", "type", "exit", "pwd", "cd"}
     
@@ -520,7 +513,6 @@ def main():
             print()
             break
         
-        # Parse command and check for redirection
         command_tokens, stdout_file, stdout_append, stderr_file, stderr_append = parse_command_with_redirection(user_input)
         
         if not command_tokens:
@@ -529,7 +521,6 @@ def main():
         command_name = command_tokens[0]
         arguments = command_tokens[1:]
         
-        # Execute built-in commands
         if command_name == "exit":
             should_exit = handle_exit_command(arguments, stdout_file, stdout_append, stderr_file, stderr_append)
             if should_exit:
@@ -543,7 +534,6 @@ def main():
         elif command_name == "type":
             handle_type_command(arguments, BUILTIN_COMMANDS, path_directories, stdout_file, stdout_append, stderr_file, stderr_append)
         else:
-            # Execute external commands
             execute_external_command(command_tokens, path_directories, stdout_file, stdout_append, stderr_file, stderr_append)
 
 
