@@ -92,7 +92,14 @@ def parse_command_with_quotes(command_string):
 
 
 def split_redirections(tokens):
-    """Split tokens that contain redirection operators."""
+    """
+    Split tokens that contain redirection operators.
+    
+    Must check longer operators first to avoid incorrect matches:
+    - Check 2>> before 2>
+    - Check 1>> before 1>
+    - Check >> before >
+    """
     result = []
     
     for token in tokens:
@@ -136,11 +143,11 @@ def split_redirections(tokens):
             result.append('2>')
             if after:
                 result.append(after)
-        # Check for 1>
+        # Check for 1> (THIS WAS THE BUG)
         elif '1>' in token:
-            idx = token.index('1>>')
+            idx = token.index('1>')  # ✓ FIXED: was '1>>' 
             before = token[:idx]
-            after = token[idx + 2:]
+            after = token[idx + 2:]  # ✓ Length of '1>' is 2
             if before:
                 result.append(before)
             result.append('1>')
@@ -220,6 +227,10 @@ def parse_command_with_redirection(command_string):
 def find_executable_in_path(command_name, path_directories):
     """Search for an executable command in the PATH directories."""
     for directory in path_directories:
+        # Skip non-existent directories
+        if not os.path.isdir(directory):
+            continue
+            
         full_path = os.path.join(directory, command_name)
         if os.path.isfile(full_path) and os.access(full_path, os.X_OK):
             return full_path
@@ -260,10 +271,12 @@ def get_executables_in_path(path_directories):
 
 def handle_exit_command(args, stdout_file=None, stdout_append=False, stderr_file=None, stderr_append=False):
     """Handle the 'exit' command."""
+    # Create empty stderr file if specified
     if stderr_file:
         try:
             mode = 'a' if stderr_append else 'w'
-            open(stderr_file, mode).close()
+            with open(stderr_file, mode):
+                pass
         except:
             pass
     return True
@@ -273,10 +286,12 @@ def handle_echo_command(args, stdout_file=None, stdout_append=False, stderr_file
     """Handle the 'echo' command - prints arguments to stdout or file."""
     output = ' '.join(args) if args else ''
     
+    # Create empty stderr file if specified
     if stderr_file:
         try:
             mode = 'a' if stderr_append else 'w'
-            open(stderr_file, mode).close()
+            with open(stderr_file, mode):
+                pass
         except:
             pass
     
@@ -303,10 +318,12 @@ def handle_pwd_command(args, stdout_file=None, stdout_append=False, stderr_file=
     """Handle the 'pwd' command - prints current working directory."""
     output = os.getcwd()
     
+    # Create empty stderr file if specified
     if stderr_file:
         try:
             mode = 'a' if stderr_append else 'w'
-            open(stderr_file, mode).close()
+            with open(stderr_file, mode):
+                pass
         except:
             pass
     
@@ -331,14 +348,14 @@ def handle_pwd_command(args, stdout_file=None, stdout_append=False, stderr_file=
 
 def handle_cd_command(args, stdout_file=None, stdout_append=False, stderr_file=None, stderr_append=False):
     """Handle the 'cd' command - changes current working directory."""
+    stderr_handle = None
+    
     if stderr_file:
         try:
             mode = 'a' if stderr_append else 'w'
             stderr_handle = open(stderr_file, mode)
         except:
             stderr_handle = None
-    else:
-        stderr_handle = None
     
     if not args:
         target_directory = os.path.expanduser("~")
@@ -377,14 +394,14 @@ def handle_cd_command(args, stdout_file=None, stdout_append=False, stderr_file=N
 
 def handle_type_command(args, builtin_commands, path_directories, stdout_file=None, stdout_append=False, stderr_file=None, stderr_append=False):
     """Handle the 'type' command - shows what kind of command something is."""
+    stderr_handle = None
+    
     if stderr_file:
         try:
             mode = 'a' if stderr_append else 'w'
             stderr_handle = open(stderr_file, mode)
         except:
             stderr_handle = None
-    else:
-        stderr_handle = None
     
     if not args:
         error_msg = "type: missing argument\n"
@@ -482,7 +499,7 @@ def execute_external_command(command_parts, path_directories, stdout_file=None, 
 
 
 # Tab completion setup
-BUILTIN_COMMANDS = ["echo", "exit"]
+BUILTIN_COMMANDS = ["echo", "exit", "pwd", "cd", "type"]
 PATH_DIRECTORIES = []
 EXECUTABLES_CACHE = set()
 
@@ -510,6 +527,7 @@ def completer(text, state):
     line = readline.get_line_buffer()
     
     # Only complete if we're at the beginning of the line (completing the command)
+    # This means the text should be the first word
     if line.lstrip() == text:
         # Combine builtins and executables
         all_commands = set(BUILTIN_COMMANDS) | EXECUTABLES_CACHE
@@ -521,6 +539,11 @@ def completer(text, state):
         if state < len(options):
             # Add a space after the completion
             return options[state] + ' '
+        else:
+            # Ring the bell when no more completions
+            if state == 0 and not options:
+                sys.stdout.write('\a')
+                sys.stdout.flush()
     
     return None
 
