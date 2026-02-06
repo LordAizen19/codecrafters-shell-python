@@ -138,7 +138,7 @@ def split_redirections(tokens):
                 result.append(after)
         # Check for 1>
         elif '1>' in token:
-            idx = token.index('1>')
+            idx = token.index('1>>')
             before = token[:idx]
             after = token[idx + 2:]
             if before:
@@ -224,6 +224,38 @@ def find_executable_in_path(command_name, path_directories):
         if os.path.isfile(full_path) and os.access(full_path, os.X_OK):
             return full_path
     return None
+
+
+def get_executables_in_path(path_directories):
+    """
+    Get all executable files in PATH directories.
+    
+    Returns:
+        Set of executable names (not full paths)
+    """
+    executables = set()
+    
+    for directory in path_directories:
+        # Skip if directory doesn't exist
+        if not os.path.isdir(directory):
+            continue
+        
+        try:
+            # List all files in the directory
+            for filename in os.listdir(directory):
+                full_path = os.path.join(directory, filename)
+                
+                # Check if it's a file and executable
+                if os.path.isfile(full_path) and os.access(full_path, os.X_OK):
+                    executables.add(filename)
+        except PermissionError:
+            # Skip directories we can't read
+            continue
+        except Exception:
+            # Skip any other errors
+            continue
+    
+    return executables
 
 
 def handle_exit_command(args, stdout_file=None, stdout_append=False, stderr_file=None, stderr_append=False):
@@ -450,11 +482,22 @@ def execute_external_command(command_parts, path_directories, stdout_file=None, 
 
 
 # Tab completion setup
-COMPLETABLE_COMMANDS = ['echo', 'exit']
+BUILTIN_COMMANDS = ["echo", "exit"]
+PATH_DIRECTORIES = []
+EXECUTABLES_CACHE = set()
+
+
+def update_executables_cache():
+    """Update the cache of available executables."""
+    global EXECUTABLES_CACHE
+    EXECUTABLES_CACHE = get_executables_in_path(PATH_DIRECTORIES)
+
 
 def completer(text, state):
     """
     Tab completion function for readline.
+    
+    Completes both builtin commands and executables in PATH.
     
     Args:
         text: The text to complete
@@ -467,10 +510,12 @@ def completer(text, state):
     line = readline.get_line_buffer()
     
     # Only complete if we're at the beginning of the line (completing the command)
-    # This means there's no space before the text we're completing
     if line.lstrip() == text:
+        # Combine builtins and executables
+        all_commands = set(BUILTIN_COMMANDS) | EXECUTABLES_CACHE
+        
         # Find all commands that start with the given text
-        options = [cmd for cmd in COMPLETABLE_COMMANDS if cmd.startswith(text)]
+        options = sorted([cmd for cmd in all_commands if cmd.startswith(text)])
         
         # Return the completion at the given state index
         if state < len(options):
@@ -494,14 +539,19 @@ def setup_readline():
 
 def main():
     """Main shell loop."""
+    global PATH_DIRECTORIES
+    
+    # Get PATH directories
+    path_env = os.environ.get("PATH", "")
+    PATH_DIRECTORIES = path_env.split(os.pathsep)
+    
+    # Build executables cache
+    update_executables_cache()
     
     # Setup tab completion
     setup_readline()
     
-    BUILTIN_COMMANDS = {"echo", "type", "exit", "pwd", "cd"}
-    
-    path_env = os.environ.get("PATH", "")
-    path_directories = path_env.split(os.pathsep)
+    BUILTIN_COMMANDS_SET = {"echo", "type", "exit", "pwd", "cd"}
     
     while True:
         sys.stdout.write("$ ")
@@ -532,9 +582,9 @@ def main():
         elif command_name == "cd":
             handle_cd_command(arguments, stdout_file, stdout_append, stderr_file, stderr_append)
         elif command_name == "type":
-            handle_type_command(arguments, BUILTIN_COMMANDS, path_directories, stdout_file, stdout_append, stderr_file, stderr_append)
+            handle_type_command(arguments, BUILTIN_COMMANDS_SET, PATH_DIRECTORIES, stdout_file, stdout_append, stderr_file, stderr_append)
         else:
-            execute_external_command(command_tokens, path_directories, stdout_file, stdout_append, stderr_file, stderr_append)
+            execute_external_command(command_tokens, PATH_DIRECTORIES, stdout_file, stdout_append, stderr_file, stderr_append)
 
 
 if __name__ == "__main__":
