@@ -515,12 +515,54 @@ def update_executables_cache():
     EXECUTABLES_CACHE = get_executables_in_path(PATH_DIRECTORIES)
 
 
+def longest_common_prefix(strings):
+    """
+    Find the longest common prefix of a list of strings.
+    
+    Args:
+        strings: List of strings to find common prefix
+        
+    Returns:
+        The longest common prefix string, or empty string if none
+    
+    Examples:
+        ['xyz_foo', 'xyz_foo_bar', 'xyz_foo_bar_baz'] -> 'xyz_foo'
+        ['abc', 'abd', 'abe'] -> 'ab'
+        ['hello', 'world'] -> ''
+    """
+    if not strings:
+        return ""
+    
+    if len(strings) == 1:
+        return strings[0]
+    
+    # Sort to make comparison easier (shortest and longest lexicographically)
+    strings = sorted(strings)
+    first = strings[0]
+    last = strings[-1]
+    
+    # Find common prefix between first and last
+    # If they share a prefix, all strings in between will too
+    common = []
+    for i in range(min(len(first), len(last))):
+        if first[i] == last[i]:
+            common.append(first[i])
+        else:
+            break
+    
+    return ''.join(common)
+
+
 def completer(text, state):
     """
     Tab completion function for readline.
     
     Completes both builtin commands and executables in PATH.
-    Handles multiple matches with bell on first press and list on second press.
+    Handles:
+    - Single match: complete with trailing space
+    - Multiple matches: complete to longest common prefix
+    - No additional completion: ring bell
+    - Second tab with multiple matches: show all options
     
     Args:
         text: The text to complete
@@ -535,7 +577,6 @@ def completer(text, state):
     line = readline.get_line_buffer()
     
     # Only complete if we're at the beginning of the line (completing the command)
-    # This means the text should be the first word
     if line.lstrip() == text:
         # When state is 0, this is a new completion request
         if state == 0:
@@ -561,30 +602,58 @@ def completer(text, state):
                 sys.stdout.write('\a')
                 sys.stdout.flush()
                 return None
+            
             elif len(options) == 1:
-                # Single match - complete it with a space
-                return options[0] + ' '
+                # Single match - complete it with a trailing space
+                result = options[0] + ' '
+                # Reset state since we completed
+                last_completion_text = None
+                tab_press_count = 0
+                return result
+            
             else:
-                # Multiple matches
-                if tab_press_count == 1:
-                    # First tab - ring bell and return None to show we have multiple matches
-                    sys.stdout.write('\a')
-                    sys.stdout.flush()
-                    return None
-                elif tab_press_count == 2:
-                    # Second tab - display all options
-                    # Print newline, then options separated by two spaces
-                    print()
-                    print('  '.join(options))
-                    # Redisplay the prompt and current input
-                    sys.stdout.write("$ " + text)
-                    sys.stdout.flush()
-                    return None
+                # Multiple matches - find longest common prefix
+                lcp = longest_common_prefix(options)
+                
+                # Check if we can complete further than current text
+                if len(lcp) > len(text):
+                    # We can complete to the LCP
+                    if tab_press_count == 1:
+                        # First tab - complete to LCP (no trailing space)
+                        return lcp
+                    elif tab_press_count == 2:
+                        # Second tab - show all options
+                        print()
+                        print('  '.join(options))
+                        # Redisplay the prompt and current LCP
+                        sys.stdout.write("$ " + lcp)
+                        sys.stdout.flush()
+                        return None
+                    else:
+                        # Third+ tab - ring bell
+                        sys.stdout.write('\a')
+                        sys.stdout.flush()
+                        return None
                 else:
-                    # Third+ tab - ring bell again
-                    sys.stdout.write('\a')
-                    sys.stdout.flush()
-                    return None
+                    # LCP is same as current text - can't complete further
+                    if tab_press_count == 1:
+                        # First tab - ring bell (no progress possible)
+                        sys.stdout.write('\a')
+                        sys.stdout.flush()
+                        return None
+                    elif tab_press_count == 2:
+                        # Second tab - show all options
+                        print()
+                        print('  '.join(options))
+                        # Redisplay the prompt and current text
+                        sys.stdout.write("$ " + text)
+                        sys.stdout.flush()
+                        return None
+                    else:
+                        # Third+ tab - ring bell
+                        sys.stdout.write('\a')
+                        sys.stdout.flush()
+                        return None
         else:
             # state > 0 means readline is asking for additional completions
             # We don't provide multiple completion options - we handle it manually
