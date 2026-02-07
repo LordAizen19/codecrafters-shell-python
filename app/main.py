@@ -11,7 +11,7 @@ def parse_command_with_quotes(command_string):
     - Double quotes (backslash escapes \ and " only)
     - Backslash escaping outside quotes
     
-    This does NOT handle redirection operators - that's done separately.
+    This does NOT handle redirection operators or pipes - that's done separately.
     """
     arguments = []
     current_argument = ""
@@ -169,14 +169,51 @@ def split_redirections(tokens):
     return result
 
 
+def split_pipes(tokens):
+    """
+    Split tokens by pipe operator.
+    
+    Returns:
+        List of command token lists, split by pipes
+        
+    Example:
+        ['cat', 'file', '|', 'wc', '-l'] -> [['cat', 'file'], ['wc', '-l']]
+    """
+    commands = []
+    current_command = []
+    
+    for token in tokens:
+        if token == '|':
+            if current_command:
+                commands.append(current_command)
+                current_command = []
+        else:
+            current_command.append(token)
+    
+    # Don't forget the last command
+    if current_command:
+        commands.append(current_command)
+    
+    return commands
+
+
 def parse_command_with_redirection(command_string):
     """Parse command and extract redirection information."""
     tokens = parse_command_with_quotes(command_string.strip())
     
     if not tokens:
-        return [], None, False, None, False
+        return [], None, False, None, False, []
     
     tokens = split_redirections(tokens)
+    
+    # Check if there's a pipe
+    if '|' in tokens:
+        # Split by pipes
+        pipeline_commands = split_pipes(tokens)
+        
+        # For now, we don't support redirections with pipes in the same way
+        # Return the pipeline commands
+        return [], None, False, None, False, pipeline_commands
     
     stdout_file = None
     stdout_append = False
@@ -221,7 +258,7 @@ def parse_command_with_redirection(command_string):
             command_tokens.append(token)
             i += 1
     
-    return command_tokens, stdout_file, stdout_append, stderr_file, stderr_append
+    return command_tokens, stdout_file, stdout_append, stderr_file, stderr_append, []
 
 
 def find_executable_in_path(command_name, path_directories):
@@ -498,6 +535,103 @@ def execute_external_command(command_parts, path_directories, stdout_file=None, 
             print(error_msg.rstrip())
 
 
+def execute_pipeline(pipeline_commands, path_directories):
+    """
+    Execute a pipeline of commands.
+    
+    Args:
+        pipeline_commands: List of command token lists (e.g., [['cat', 'file'], ['wc', '-l']])
+        path_directories: List of PATH directories
+        
+    Pipeline execution steps:
+    1. Create a pipe for each connection between commands
+    2. Fork a process for each command
+    3. Set up stdin/stdout redirection for each process
+    4. Wait for all processes to complete
+    """
+    if not pipeline_commands:
+        return
+    
+    if len(pipeline_commands) == 1:
+        # Not actually a pipeline, just execute the single command
+        command_parts = pipeline_commands[0]
+        if command_parts:
+            execute_external_command(command_parts, path_directories)
+        return
+    
+    # We need len(commands) - 1 pipes
+    num_pipes = len(pipeline_commands) - 1
+    pipes = []
+    
+    # Create all pipes
+    for _ in range(num_pipes):
+        read_fd, write_fd = os.pipe()
+        pipes.append((read_fd, write_fd))
+    
+    processes = []
+    
+    # Execute each command in the pipeline
+    for i, command_parts in enumerate(pipeline_commands):
+        if not command_parts:
+            continue
+        
+        command_name = command_parts[0]
+        executable_path = find_executable_in_path(command_name, path_directories)
+        
+        if not executable_path:
+            print(f"{command_name}: command not found")
+            # Clean up pipes
+            for read_fd, write_fd in pipes:
+                os.close(read_fd)
+                os.close(write_fd)
+            # Wait for any already-started processes
+            for proc in processes:
+                proc.wait()
+            return
+        
+        # Fork a new process
+        pid = os.fork()
+        
+        if pid == 0:
+            # Child process
+            
+            # Set up stdin (read from previous pipe)
+            if i > 0:
+                # Not the first command - read from previous pipe
+                prev_read_fd, prev_write_fd = pipes[i - 1]
+                os.dup2(prev_read_fd, 0)  # Redirect stdin to read end of previous pipe
+            
+            # Set up stdout (write to next pipe)
+            if i < len(pipeline_commands) - 1:
+                # Not the last command - write to next pipe
+                next_read_fd, next_write_fd = pipes[i]
+                os.dup2(next_write_fd, 1)  # Redirect stdout to write end of current pipe
+            
+            # Close all pipe file descriptors in child
+            for read_fd, write_fd in pipes:
+                os.close(read_fd)
+                os.close(write_fd)
+            
+            # Execute the command
+            try:
+                os.execv(executable_path, command_parts)
+            except Exception as e:
+                print(f"Error executing {command_name}: {e}", file=sys.stderr)
+                os._exit(1)
+        else:
+            # Parent process
+            processes.append(type('Process', (), {'pid': pid, 'wait': lambda self: os.waitpid(self.pid, 0)})())
+    
+    # Close all pipes in parent
+    for read_fd, write_fd in pipes:
+        os.close(read_fd)
+        os.close(write_fd)
+    
+    # Wait for all child processes
+    for proc in processes:
+        proc.wait()
+
+
 # Tab completion setup
 BUILTIN_COMMANDS = ["echo", "exit", "pwd", "cd", "type"]
 PATH_DIRECTORIES = []
@@ -524,11 +658,6 @@ def longest_common_prefix(strings):
         
     Returns:
         The longest common prefix string, or empty string if none
-    
-    Examples:
-        ['xyz_foo', 'xyz_foo_bar', 'xyz_foo_bar_baz'] -> 'xyz_foo'
-        ['abc', 'abd', 'abe'] -> 'ab'
-        ['hello', 'world'] -> ''
     """
     if not strings:
         return ""
@@ -536,13 +665,12 @@ def longest_common_prefix(strings):
     if len(strings) == 1:
         return strings[0]
     
-    # Sort to make comparison easier (shortest and longest lexicographically)
+    # Sort to make comparison easier
     strings = sorted(strings)
     first = strings[0]
     last = strings[-1]
     
     # Find common prefix between first and last
-    # If they share a prefix, all strings in between will too
     common = []
     for i in range(min(len(first), len(last))):
         if first[i] == last[i]:
@@ -558,18 +686,6 @@ def completer(text, state):
     Tab completion function for readline.
     
     Completes both builtin commands and executables in PATH.
-    Handles:
-    - Single match: complete with trailing space
-    - Multiple matches: complete to longest common prefix
-    - No additional completion: ring bell
-    - Second tab with multiple matches: show all options
-    
-    Args:
-        text: The text to complete
-        state: The iteration state (0 for first call, 1 for second, etc.)
-    
-    Returns:
-        The completion string, or None if no more completions
     """
     global last_completion_text, last_completion_options, tab_press_count
     
@@ -656,7 +772,6 @@ def completer(text, state):
                         return None
         else:
             # state > 0 means readline is asking for additional completions
-            # We don't provide multiple completion options - we handle it manually
             return None
     else:
         # Not at the beginning - reset state
@@ -710,7 +825,12 @@ def main():
             print()
             break
         
-        command_tokens, stdout_file, stdout_append, stderr_file, stderr_append = parse_command_with_redirection(user_input)
+        command_tokens, stdout_file, stdout_append, stderr_file, stderr_append, pipeline_commands = parse_command_with_redirection(user_input)
+        
+        # Check if this is a pipeline
+        if pipeline_commands:
+            execute_pipeline(pipeline_commands, PATH_DIRECTORIES)
+            continue
         
         if not command_tokens:
             continue
