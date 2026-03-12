@@ -8,83 +8,81 @@ A Unix-like shell implementation in Python, built as part of the CodeCrafters "B
 
 ## Overview
 
-This project implements a basic shell with command parsing and quote handling. The current completed stage focuses on double-quote parsing, building on previous work with single quotes. The parser correctly handles both single and double quotes, preserving spaces within quotes and concatenating adjacent quoted strings.
+This project implements an interactive shell with parsing, built-ins, external command execution, redirections, pipelines, and command tab completion. The shell follows Unix-like behavior for common commands and supports mixed built-in and external commands in pipelines.
 
 ## Implemented Features
 
-- Command tokenization
-- Single-quote handling
-- Double-quote handling
-- Preserving spaces inside quotes
-- Concatenation of adjacent quoted strings
-- Character-by-character parsing with state tracking
+- Interactive REPL prompt (`$ `)
+- Built-in commands: `echo`, `exit`, `pwd`, `cd`, `type`
+- External command lookup through `PATH`
+- Quote-aware command tokenization:
+  - single quotes (`'...'`)
+  - double quotes (`"..."`)
+  - escape handling with backslashes
+- Output redirection support:
+  - stdout: `>`, `1>`, `>>`, `1>>`
+  - stderr: `2>`, `2>>`
+- Pipeline support with `|`
+- Mixed pipelines with built-ins and external commands
+- Command tab completion (built-ins + executables from `PATH`)
 
-## How Quote Parsing Works
+## How Parsing Works
 
-The parser uses a state machine approach to handle both single and double quotes:
+The parser processes input in stages:
 
-- A `quote_state` variable tracks the current parsing context: `None`, `'SINGLE'`, or `'DOUBLE'`
-- When encountering a quote character:
-  - If outside any quotes, enter the corresponding quote state
-  - If inside the matching quote type, exit that state
-  - If inside a different quote type, treat the character as literal
-- Whitespace behavior depends on the quote state:
-  - Inside quotes: whitespace is preserved as part of the token
-  - Outside quotes: whitespace separates tokens
-- Adjacent quoted and unquoted segments without separating whitespace are concatenated into a single token
+1. Tokenize with quote and escape awareness (`parse_command_with_quotes`)
+2. Split inline redirection operators from tokens (`split_redirections`)
+3. Detect and split pipelines (`split_pipes`)
+4. Extract redirection targets for non-pipeline commands (`parse_command_with_redirection`)
 
-This state-based parsing ensures correct handling of nested quote scenarios like `echo "shell's test"` or `echo 'say "hello"'`.
+Quote parsing uses a state machine with `quote_state` (`None`, `SINGLE`, `DOUBLE`) and `escape_next` to correctly preserve literals and spaces inside quotes.
 
 ## Code Example
 
 ```python
-def parse_command_with_quotes(command_string):
-    """
-    Parse command string, handling both single and double quotes.
-    
-    Examples:
-        echo "hello world" → ["echo", "hello world"]
-        echo 'hello' "world" → ["echo", "hello", "world"]
-        echo "shell's test" → ["echo", "shell's test"]
-        echo "hello""world" → ["echo", "helloworld"]
-    """
-    arguments = []
-    current_argument = ""
-    quote_state = None  # Can be: None, 'SINGLE', or 'DOUBLE'
-    
-    for char in command_string:
-        if char == "'":
-            if quote_state is None:
-                quote_state = 'SINGLE'
-            elif quote_state == 'SINGLE':
-                quote_state = None
-            else:
-                current_argument += char
-        
-        elif char == '"':
-            if quote_state is None:
-                quote_state = 'DOUBLE'
-            elif quote_state == 'DOUBLE':
-                quote_state = None
-            else:
-                current_argument += char
-        
-        elif char in (' ', '\t'):
-            if quote_state is not None:
-                current_argument += char
-            else:
-                if current_argument:
-                    arguments.append(current_argument)
-                    current_argument = ""
-        
-        else:
-            current_argument += char
-    
-    if current_argument:
-        arguments.append(current_argument)
-    
-    return arguments
+def parse_command_with_redirection(command_string):
+    tokens = parse_command_with_quotes(command_string.strip())
+    if not tokens:
+        return [], None, False, None, False, []
+
+    tokens = split_redirections(tokens)
+
+    if '|' in tokens:
+        pipeline_commands = split_pipes(tokens)
+        return [], None, False, None, False, pipeline_commands
+
+    # parse stdout/stderr redirections from tokens
+    # and return command tokens + redirection metadata
 ```
+
+## Supported Commands
+
+- `echo [args...]`
+- `pwd`
+- `cd [path]`
+- `type <command>`
+- `exit`
+
+If the command is not a built-in, the shell searches executable files in `PATH` and runs the first match.
+
+## Redirection and Pipeline Examples
+
+```bash
+echo "hello world" > out.txt
+echo "append" >> out.txt
+ls /not-found 2> err.txt
+cat file.txt | grep foo | wc -l
+echo "hi" | wc -c
+```
+
+## Tab Completion
+
+Tab completion is implemented with `readline` and supports:
+
+- Built-in command names
+- Executables discovered from `PATH`
+- Longest common prefix completion for multiple matches
+- Double-tab listing of all matching options
 
 ## Running the Program
 
@@ -94,33 +92,20 @@ The shell can be started using:
 ./your_program.sh
 ```
 
-## What I Learned Today
-
-Quote states can be tracked with a variable (None, 'SINGLE', 'DOUBLE')
-
-Quotes inside other quotes are literal characters
-
-State machines are powerful for parsing
-
-You can handle multiple similar but different cases elegantly
-
-**Key differences from single quotes:**
-
-- Single quotes: Only one quote type to track
-- Double quotes: Need to distinguish between two quote types
-- Solution: Use quote_state instead of boolean
-
 ## Challenges Faced
 
-Handling quoted input correctly required careful consideration of several edge cases:
+Implementing shell behavior required handling multiple edge cases cleanly:
 
-- Determining when spaces should act as separators versus literal characters
-- Managing transitions between different quote states
-- Preserving characters that would normally be special when inside the opposite quote type
-- Concatenating adjacent quoted and unquoted segments correctly
+- Correct quote/escape parsing without breaking token boundaries
+- Splitting redirection operators when attached to tokens (for example `echo>file`)
+- Running built-ins inside pipelines while preserving shell process state
+- Avoiding pipeline deadlocks by closing the correct pipe file descriptors
+- Coordinating redirection behavior for stdout and stderr
 
-The state machine approach solved these problems by explicitly tracking the current parsing context and adjusting behavior based on that state.
+The implementation solves this with clear parser stages and careful file descriptor management for pipeline execution.
 
 ## Next Steps
 
-Backslash inside quotes
+- Add argument-level completion and filename/path completion
+- Improve error messages for malformed redirection syntax
+- Add support for more shell features (for example `;`, `&&`, environment variable expansion)
