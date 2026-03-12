@@ -924,37 +924,6 @@ def execute_pipeline(pipeline_commands, path_directories, builtin_commands_set):
         pipeline_commands (list[list[str]]): List of command token lists
         path_directories (list[str]): PATH directories to search
         builtin_commands_set (set[str]): Set of built-in command names
-        
-    Pipeline Execution Process:
-        1. Create N-1 pipes for N commands
-        2. For each command:
-           - If built-in: Execute in parent with redirected I/O
-           - If external: Fork child, redirect I/O, execv
-        3. Close all pipe file descriptors in parent
-        4. Wait for all child processes to complete
-        
-    Examples:
-        >>> # cat file.txt | grep pattern | wc -l
-        >>> execute_pipeline([['cat', 'file.txt'], ['grep', 'pattern'], ['wc', '-l']], 
-        ...                  ['/bin'], {'echo', 'type'})
-        
-        >>> # echo hello | wc -c (built-in piped to external)
-        >>> execute_pipeline([['echo', 'hello'], ['wc', '-c']], 
-        ...                  ['/usr/bin'], {'echo'})
-    
-    Pipe Structure:
-        For 3 commands A | B | C, we create 2 pipes:
-        
-        A (stdout) -> pipe0 -> B (stdin)
-        B (stdout) -> pipe1 -> C (stdin)
-        
-        pipe0 = (read_fd0, write_fd0)
-        pipe1 = (read_fd1, write_fd1)
-    
-    Important:
-        - Pipe FDs must be closed in parent after children fork
-        - Built-in commands must close their pipe FDs immediately after use
-        - Failure to close pipes causes deadlocks (child waits for EOF)
     """
     # Handle edge case: empty pipeline
     if not pipeline_commands:
@@ -984,6 +953,9 @@ def execute_pipeline(pipeline_commands, path_directories, builtin_commands_set):
     
     # Track child processes (for external commands)
     processes = []
+    
+    # Track which pipe FDs have been closed (to avoid double-close)
+    closed_fds = set()
     
     # Execute each command in the pipeline
     for i, command_parts in enumerate(pipeline_commands):
@@ -1015,12 +987,13 @@ def execute_pipeline(pipeline_commands, path_directories, builtin_commands_set):
             execute_builtin_in_pipeline(command_parts, builtin_commands_set, 
                                        path_directories, stdin_fd, stdout_fd)
             
-            # CRITICAL: Close the pipe FDs we just used
-            # If we don't close the write end, the next command will wait forever
-            if stdin_fd is not None:
+            # CRITICAL: Close the pipe FDs we just used and track them
+            if stdin_fd is not None and stdin_fd not in closed_fds:
                 os.close(stdin_fd)
-            if stdout_fd is not None:
+                closed_fds.add(stdin_fd)
+            if stdout_fd is not None and stdout_fd not in closed_fds:
                 os.close(stdout_fd)
+                closed_fds.add(stdout_fd)
         else:
             # ========== EXTERNAL COMMAND PATH ==========
             # Fork a child process and execv
@@ -1033,16 +1006,18 @@ def execute_pipeline(pipeline_commands, path_directories, builtin_commands_set):
                 print(f"{command_name}: command not found")
                 
                 # Clean up remaining pipes
-                for j in range(i, len(pipes)):
+                for j in range(len(pipes)):
                     read_fd, write_fd = pipes[j]
-                    try:
-                        os.close(read_fd)
-                    except:
-                        pass
-                    try:
-                        os.close(write_fd)
-                    except:
-                        pass
+                    if read_fd not in closed_fds:
+                        try:
+                            os.close(read_fd)
+                        except:
+                            pass
+                    if write_fd not in closed_fds:
+                        try:
+                            os.close(write_fd)
+                        except:
+                            pass
                 
                 # Wait for any already-started child processes
                 for proc in processes:
@@ -1068,18 +1043,22 @@ def execute_pipeline(pipeline_commands, path_directories, builtin_commands_set):
                     os.dup2(next_write_fd, 1)  # stdout = current pipe's write end
                 
                 # Close ALL pipe file descriptors in child
-                # Child only needs the redirected stdin/stdout, not the raw pipes
                 for read_fd, write_fd in pipes:
-                    os.close(read_fd)
-                    os.close(write_fd)
+                    try:
+                        os.close(read_fd)
+                    except:
+                        pass
+                    try:
+                        os.close(write_fd)
+                    except:
+                        pass
                 
                 # Execute the external command
-                # This replaces the child process with the new program
                 try:
                     os.execv(executable_path, command_parts)
                 except Exception as e:
                     print(f"Error executing {command_name}: {e}", file=sys.stderr)
-                    os._exit(1)  # Exit child process on error
+                    os._exit(1)
             else:
                 # ===== PARENT PROCESS =====
                 # Track the child process so we can wait for it later
@@ -1089,16 +1068,17 @@ def execute_pipeline(pipeline_commands, path_directories, builtin_commands_set):
                 })())
     
     # Close all remaining pipe file descriptors in parent
-    # This is CRITICAL - if the parent keeps pipes open, children will hang
     for read_fd, write_fd in pipes:
-        try:
-            os.close(read_fd)
-        except:
-            pass  # May already be closed by built-in execution
-        try:
-            os.close(write_fd)
-        except:
-            pass
+        if read_fd not in closed_fds:
+            try:
+                os.close(read_fd)
+            except:
+                pass
+        if write_fd not in closed_fds:
+            try:
+                os.close(write_fd)
+            except:
+                pass
     
     # Wait for all child processes to complete
     for proc in processes:
