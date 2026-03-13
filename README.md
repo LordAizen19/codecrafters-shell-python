@@ -1,19 +1,25 @@
 <p align="center">
-  <img src="file:///home/ichigoat/Desktop/Python-Projects/Images/logo.png" alt="CodeCrafters" width="120" />
+  <img src="https://app.codecrafters.io/assets/7408d202b2bb110054fc.svg" alt="CodeCrafters" width="120" />
 </p>
 
 # Build Your Own Shell — Python
 
 A Unix-like shell implementation in Python, built as part of the CodeCrafters "Build Your Own Shell" challenge.
 
+## Current Stage
+
+The latest completed stage adds support for `history` as a shell builtin.
+
+The next stage is `listing history`.
+
 ## Overview
 
-This project implements an interactive shell with parsing, built-ins, external command execution, redirections, pipelines, and command tab completion. The shell follows Unix-like behavior for common commands and supports mixed built-in and external commands in pipelines.
+This project implements an interactive shell with parsing, built-ins, external command execution, redirections, pipelines, command history, and tab completion. The shell follows Unix-like behavior for common commands and supports mixed built-in and external commands in pipelines.
 
 ## Implemented Features
 
 - Interactive REPL prompt (`$ `)
-- Built-in commands: `echo`, `exit`, `pwd`, `cd`, `type`
+- Built-in commands: `echo`, `exit`, `pwd`, `cd`, `type`, `history`
 - External command lookup through `PATH`
 - Quote-aware command tokenization:
   - single quotes (`'...'`)
@@ -24,6 +30,7 @@ This project implements an interactive shell with parsing, built-ins, external c
   - stderr: `2>`, `2>>`
 - Pipeline support with `|`
 - Mixed pipelines with built-ins and external commands
+- Command history tracking with `history`
 - Command tab completion (built-ins + executables from `PATH`)
 
 ## How Parsing Works
@@ -61,6 +68,7 @@ def parse_command_with_redirection(command_string):
 - `pwd`
 - `cd [path]`
 - `type <command>`
+- `history`
 - `exit`
 
 If the command is not a built-in, the shell searches executable files in `PATH` and runs the first match.
@@ -106,6 +114,7 @@ The implementation solves this with clear parser stages and careful file descrip
 
 ## Next Steps
 
+- Complete the `listing history` stage behavior
 - Add argument-level completion and filename/path completion
 - Improve error messages for malformed redirection syntax
 - Add support for more shell features (for example `;`, `&&`, environment variable expansion)

@@ -746,6 +746,68 @@ def handle_type_command(args, builtin_commands, path_directories, stdout_file=No
         stderr_handle.close()
 
 
+def handle_history_command(args, stdout_file=None, stdout_append=False, stderr_file=None, stderr_append=False):
+    """
+    Handle the 'history' built-in command.
+    
+    History displays a numbered list of previously executed commands.
+    Each command is prefixed with its history number (1-indexed).
+    
+    Args:
+        args (list[str]): Arguments passed to history (currently unused)
+        stdout_file (str|None): File to redirect output to
+        stdout_append (bool): If True, append; if False, overwrite
+        stderr_file (str|None): Stderr redirection file
+        stderr_append (bool): Whether to append to stderr file
+        
+    Examples:
+        >>> COMMAND_HISTORY = ['ls', 'pwd', 'history']
+        >>> handle_history_command([])
+            1  ls
+            2  pwd
+            3  history
+    """
+    # Create empty stderr file if specified
+    if stderr_file:
+        try:
+            mode = 'a' if stderr_append else 'w'
+            with open(stderr_file, mode):
+                pass
+        except:
+            pass
+    
+    # Build history output
+    output_lines = []
+    for i, command in enumerate(COMMAND_HISTORY, start=1):
+        # Format: "    1  command" (4 spaces before number)
+        output_lines.append(f"    {i}  {command}")
+    
+    output = '\n'.join(output_lines)
+    
+    # Handle stdout redirection
+    if stdout_file:
+        try:
+            mode = 'a' if stdout_append else 'w'
+            with open(stdout_file, mode) as f:
+                if output:
+                    f.write(output + '\n')
+        except Exception as e:
+            error_msg = f"bash: {stdout_file}: {e}\n"
+            if stderr_file:
+                try:
+                    mode = 'a' if stderr_append else 'w'
+                    with open(stderr_file, mode) as f:
+                        f.write(error_msg)
+                except:
+                    print(error_msg.rstrip(), file=sys.stderr)
+            else:
+                print(error_msg.rstrip(), file=sys.stderr)
+    else:
+        # No redirection - print to terminal
+        if output:
+            print(output)
+
+
 def execute_external_command(command_parts, path_directories, stdout_file=None, stdout_append=False, stderr_file=None, stderr_append=False):
     """
     Execute an external (non-built-in) command.
@@ -897,6 +959,8 @@ def execute_builtin_in_pipeline(command_parts, builtin_commands_set, path_direct
             handle_cd_command(arguments)
         elif command_name == "type":
             handle_type_command(arguments, builtin_commands_set, path_directories)
+        elif command_name == "history":
+            handle_history_command(arguments)
         elif command_name == "exit":
             # Exit in a pipeline shouldn't exit the shell
             pass
@@ -924,6 +988,37 @@ def execute_pipeline(pipeline_commands, path_directories, builtin_commands_set):
         pipeline_commands (list[list[str]]): List of command token lists
         path_directories (list[str]): PATH directories to search
         builtin_commands_set (set[str]): Set of built-in command names
+        
+    Pipeline Execution Process:
+        1. Create N-1 pipes for N commands
+        2. For each command:
+           - If built-in: Execute in parent with redirected I/O
+           - If external: Fork child, redirect I/O, execv
+        3. Close all pipe file descriptors in parent
+        4. Wait for all child processes to complete
+        
+    Examples:
+        >>> # cat file.txt | grep pattern | wc -l
+        >>> execute_pipeline([['cat', 'file.txt'], ['grep', 'pattern'], ['wc', '-l']], 
+        ...                  ['/bin'], {'echo', 'type'})
+        
+        >>> # echo hello | wc -c (built-in piped to external)
+        >>> execute_pipeline([['echo', 'hello'], ['wc', '-c']], 
+        ...                  ['/usr/bin'], {'echo'})
+    
+    Pipe Structure:
+        For 3 commands A | B | C, we create 2 pipes:
+        
+        A (stdout) -> pipe0 -> B (stdin)
+        B (stdout) -> pipe1 -> C (stdin)
+        
+        pipe0 = (read_fd0, write_fd0)
+        pipe1 = (read_fd1, write_fd1)
+    
+    Important:
+        - Pipe FDs must be closed in parent after children fork
+        - Built-in commands must close their pipe FDs immediately after use
+        - Failure to close pipes causes deadlocks (child waits for EOF)
     """
     # Handle edge case: empty pipeline
     if not pipeline_commands:
@@ -1088,9 +1183,12 @@ def execute_pipeline(pipeline_commands, path_directories, builtin_commands_set):
 # ========== TAB COMPLETION SYSTEM ==========
 
 # Global state for tab completion
-BUILTIN_COMMANDS = ["echo", "exit", "pwd", "cd", "type"]
+BUILTIN_COMMANDS = ["echo", "exit", "pwd", "cd", "type", "history"]
 PATH_DIRECTORIES = []
 EXECUTABLES_CACHE = set()
+
+# Command history tracking
+COMMAND_HISTORY = []
 
 # Track tab completion state across calls
 last_completion_text = None
@@ -1336,9 +1434,10 @@ def main():
     Main Loop:
         1. Display prompt ("$ ")
         2. Read user input
-        3. Parse command (quotes, redirections, pipes)
-        4. Execute command (built-in or external, single or pipeline)
-        5. Repeat until 'exit' or EOF
+        3. Add command to history
+        4. Parse command (quotes, redirections, pipes)
+        5. Execute command (built-in or external, single or pipeline)
+        6. Repeat until 'exit' or EOF
     
     Command Execution Flow:
         - Pipeline: Call execute_pipeline()
@@ -1358,7 +1457,7 @@ def main():
     setup_readline()
     
     # Set of built-in command names
-    BUILTIN_COMMANDS_SET = {"echo", "type", "exit", "pwd", "cd"}
+    BUILTIN_COMMANDS_SET = {"echo", "type", "exit", "pwd", "cd", "history"}
     
     # Main REPL loop
     while True:
@@ -1378,6 +1477,10 @@ def main():
             # User pressed Ctrl+D - exit gracefully
             print()  # Print newline for clean exit
             break
+        
+        # Add command to history (skip empty commands)
+        if user_input.strip():
+            COMMAND_HISTORY.append(user_input.strip())
         
         # Parse the command (handles quotes, redirections, pipes)
         command_tokens, stdout_file, stdout_append, stderr_file, stderr_append, pipeline_commands = parse_command_with_redirection(user_input)
@@ -1409,6 +1512,8 @@ def main():
             handle_cd_command(arguments, stdout_file, stdout_append, stderr_file, stderr_append)
         elif command_name == "type":
             handle_type_command(arguments, BUILTIN_COMMANDS_SET, PATH_DIRECTORIES, stdout_file, stdout_append, stderr_file, stderr_append)
+        elif command_name == "history":
+            handle_history_command(arguments, stdout_file, stdout_append, stderr_file, stderr_append)
         else:
             # Not a built-in - execute as external command
             execute_external_command(command_tokens, PATH_DIRECTORIES, stdout_file, stdout_append, stderr_file, stderr_append)
