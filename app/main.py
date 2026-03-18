@@ -9,83 +9,60 @@ COMMAND_HISTORY = []
 
 
 def parse_command_with_quotes(command_string):
-    r"""
-    Parse command string, handling:
-    - Single quotes (everything literal)
-    - Double quotes (backslash escapes \ and " only)
-    - Backslash escaping outside quotes
-    
-    This does NOT handle redirection operators - that's done separately.
-    """
+    r"""Parse command string with quote handling."""
     arguments = []
     current_argument = ""
-    quote_state = None  # None, 'SINGLE', or 'DOUBLE'
-    escape_next = False  # True if previous char was backslash
+    quote_state = None
+    escape_next = False
     
     for char in command_string:
-        # STEP 1: Handle escaped characters
         if escape_next:
             if quote_state == 'DOUBLE':
-                # Inside double quotes: only \ and " can be escaped
                 if char in ('\\', '"'):
                     current_argument += char
                 else:
-                    # Not a valid escape sequence - keep the backslash
                     current_argument += '\\' + char
             else:
-                # Outside quotes: add character as-is
                 current_argument += char
             escape_next = False
             continue
         
-        # STEP 2: Handle backslash
         if char == '\\':
             if quote_state == 'SINGLE':
-                # Inside single quotes: backslash is literal
                 current_argument += char
             else:
-                # Outside quotes or inside double quotes: next char might be escaped
                 escape_next = True
             continue
         
-        # STEP 3: Handle single quotes
         if char == "'":
             if quote_state is None:
                 quote_state = 'SINGLE'
             elif quote_state == 'SINGLE':
                 quote_state = None
             else:
-                # Inside double quotes, single quote is literal
                 current_argument += char
             continue
         
-        # STEP 4: Handle double quotes
         if char == '"':
             if quote_state is None:
                 quote_state = 'DOUBLE'
             elif quote_state == 'DOUBLE':
                 quote_state = None
             else:
-                # Inside single quotes, double quote is literal
                 current_argument += char
             continue
         
-        # STEP 5: Handle whitespace
         if char in (' ', '\t'):
             if quote_state is not None:
-                # Inside quotes: preserve whitespace
                 current_argument += char
             else:
-                # Outside quotes: whitespace ends the argument
                 if current_argument:
                     arguments.append(current_argument)
                     current_argument = ""
             continue
         
-        # STEP 6: Regular characters
         current_argument += char
     
-    # Handle trailing backslash
     if escape_next and quote_state != 'DOUBLE':
         current_argument += '\\'
     
@@ -95,12 +72,38 @@ def parse_command_with_quotes(command_string):
     return arguments
 
 
+def split_by_pipe(tokens):
+    """
+    Split tokens by pipe operator.
+    
+    Returns: List of command segments (each segment is a list of tokens)
+    
+    Example:
+        ["cat", "file", "|", "grep", "hello"] 
+        → [["cat", "file"], ["grep", "hello"]]
+    """
+    commands = []
+    current_command = []
+    
+    for token in tokens:
+        if token == '|':
+            if current_command:
+                commands.append(current_command)
+                current_command = []
+        else:
+            current_command.append(token)
+    
+    if current_command:
+        commands.append(current_command)
+    
+    return commands
+
+
 def split_redirections(tokens):
     """Split tokens that contain redirection operators."""
     result = []
     
     for token in tokens:
-        # Check for 2>> first (before 2>)
         if '2>>' in token:
             idx = token.index('2>>')
             before = token[:idx]
@@ -110,7 +113,6 @@ def split_redirections(tokens):
             result.append('2>>')
             if after:
                 result.append(after)
-        # Check for 1>> (before 1>)
         elif '1>>' in token:
             idx = token.index('1>>')
             before = token[:idx]
@@ -120,7 +122,6 @@ def split_redirections(tokens):
             result.append('1>>')
             if after:
                 result.append(after)
-        # Check for >> (before >)
         elif '>>' in token:
             idx = token.index('>>')
             before = token[:idx]
@@ -130,7 +131,6 @@ def split_redirections(tokens):
             result.append('>>')
             if after:
                 result.append(after)
-        # Check for 2>
         elif '2>' in token:
             idx = token.index('2>')
             before = token[:idx]
@@ -140,7 +140,6 @@ def split_redirections(tokens):
             result.append('2>')
             if after:
                 result.append(after)
-        # Check for 1>
         elif '1>' in token:
             idx = token.index('1>')
             before = token[:idx]
@@ -150,7 +149,6 @@ def split_redirections(tokens):
             result.append('1>')
             if after:
                 result.append(after)
-        # Check for >
         elif '>' in token:
             idx = token.index('>')
             before = token[:idx]
@@ -158,6 +156,16 @@ def split_redirections(tokens):
             if before:
                 result.append(before)
             result.append('>')
+            if after:
+                result.append(after)
+        # Handle pipe operator
+        elif '|' in token:
+            idx = token.index('|')
+            before = token[:idx]
+            after = token[idx + 1:]
+            if before:
+                result.append(before)
+            result.append('|')
             if after:
                 result.append(after)
         else:
@@ -241,7 +249,6 @@ def get_executables_in_path(path_directories):
         try:
             for filename in os.listdir(directory):
                 full_path = os.path.join(directory, filename)
-                
                 if os.path.isfile(full_path) and os.access(full_path, os.X_OK):
                     executables.add(filename)
         except PermissionError:
@@ -252,19 +259,134 @@ def get_executables_in_path(path_directories):
     return executables
 
 
-def handle_exit_command(args, stdout_file=None, stdout_append=False, stderr_file=None, stderr_append=False):
-    """Handle the 'exit' command."""
-    if stderr_file:
-        try:
+def execute_pipeline(pipeline_commands, path_directories):
+    """
+    Execute a pipeline of commands.
+    
+    Args:
+        pipeline_commands: List of command lists
+            Example: [["cat", "file"], ["grep", "hello"], ["wc", "-l"]]
+    """
+    if not pipeline_commands:
+        return
+    
+    # Single command - no pipeline
+    if len(pipeline_commands) == 1:
+        command_tokens, stdout_file, stdout_append, stderr_file, stderr_append = parse_command_with_redirection(' '.join(pipeline_commands[0]))
+        execute_single_command(command_tokens, path_directories, stdout_file, stdout_append, stderr_file, stderr_append)
+        return
+    
+    # Multiple commands - create pipeline
+    processes = []
+    
+    for i, cmd_tokens in enumerate(pipeline_commands):
+        # Parse redirection for this command
+        command_tokens, stdout_file, stdout_append, stderr_file, stderr_append = parse_command_with_redirection(' '.join(cmd_tokens))
+        
+        if not command_tokens:
+            continue
+        
+        command_name = command_tokens[0]
+        
+        # Find executable
+        executable_path = find_executable_in_path(command_name, path_directories)
+        
+        if not executable_path:
+            print(f"{command_name}: command not found")
+            # Clean up any previous processes
+            for proc in processes:
+                try:
+                    proc.kill()
+                except:
+                    pass
+            return
+        
+        # Determine stdin
+        if i == 0:
+            # First command: stdin from terminal
+            stdin_source = None
+        else:
+            # Middle/last command: stdin from previous command
+            stdin_source = processes[i - 1].stdout
+        
+        # Determine stdout
+        if i == len(pipeline_commands) - 1:
+            # Last command
+            if stdout_file:
+                mode = 'a' if stdout_append else 'w'
+                stdout_dest = open(stdout_file, mode)
+            else:
+                stdout_dest = None  # Terminal
+        else:
+            # Not last command: pipe to next
+            stdout_dest = subprocess.PIPE
+        
+        # Determine stderr
+        if stderr_file:
             mode = 'a' if stderr_append else 'w'
-            open(stderr_file, mode).close()
-        except:
-            pass
-    return True
+            stderr_dest = open(stderr_file, mode)
+        else:
+            stderr_dest = None  # Terminal
+        
+        # Start the process
+        try:
+            proc = subprocess.Popen(
+                command_tokens,
+                executable=executable_path,
+                stdin=stdin_source,
+                stdout=stdout_dest,
+                stderr=stderr_dest
+            )
+            processes.append(proc)
+            
+            # Close the previous process's stdout in parent
+            # This is important for proper pipe behavior
+            if i > 0 and processes[i - 1].stdout:
+                processes[i - 1].stdout.close()
+                
+        except Exception as e:
+            print(f"Error executing {command_name}: {e}")
+            # Clean up
+            for proc in processes:
+                try:
+                    proc.kill()
+                except:
+                    pass
+            return
+    
+    # Wait for all processes to complete
+    for proc in processes:
+        proc.wait()
+
+
+def execute_single_command(command_tokens, path_directories, stdout_file=None, stdout_append=False, stderr_file=None, stderr_append=False):
+    """Execute a single command (handles both builtins and external)."""
+    if not command_tokens:
+        return
+    
+    command_name = command_tokens[0]
+    arguments = command_tokens[1:]
+    
+    BUILTIN_COMMANDS_SET = {"echo", "type", "exit", "pwd", "cd", "history"}
+    
+    if command_name == "exit":
+        return "EXIT"
+    elif command_name == "echo":
+        handle_echo_command(arguments, stdout_file, stdout_append, stderr_file, stderr_append)
+    elif command_name == "pwd":
+        handle_pwd_command(arguments, stdout_file, stdout_append, stderr_file, stderr_append)
+    elif command_name == "cd":
+        handle_cd_command(arguments, stdout_file, stdout_append, stderr_file, stderr_append)
+    elif command_name == "type":
+        handle_type_command(arguments, BUILTIN_COMMANDS_SET, path_directories, stdout_file, stdout_append, stderr_file, stderr_append)
+    elif command_name == "history":
+        handle_history_command(arguments, stdout_file, stdout_append, stderr_file, stderr_append)
+    else:
+        execute_external_command(command_tokens, path_directories, stdout_file, stdout_append, stderr_file, stderr_append)
 
 
 def handle_echo_command(args, stdout_file=None, stdout_append=False, stderr_file=None, stderr_append=False):
-    """Handle the 'echo' command - prints arguments to stdout or file."""
+    """Handle the 'echo' command."""
     output = ' '.join(args) if args else ''
     
     if stderr_file:
@@ -280,21 +402,13 @@ def handle_echo_command(args, stdout_file=None, stdout_append=False, stderr_file
             with open(stdout_file, mode) as f:
                 f.write(output + '\n')
         except Exception as e:
-            if stderr_file:
-                try:
-                    mode = 'a' if stderr_append else 'w'
-                    with open(stderr_file, mode) as f:
-                        f.write(f"bash: {stdout_file}: {e}\n")
-                except:
-                    print(f"bash: {stdout_file}: {e}", file=sys.stderr)
-            else:
-                print(f"bash: {stdout_file}: {e}", file=sys.stderr)
+            print(f"bash: {stdout_file}: {e}", file=sys.stderr)
     else:
         print(output)
 
 
 def handle_pwd_command(args, stdout_file=None, stdout_append=False, stderr_file=None, stderr_append=False):
-    """Handle the 'pwd' command - prints current working directory."""
+    """Handle the 'pwd' command."""
     output = os.getcwd()
     
     if stderr_file:
@@ -310,21 +424,13 @@ def handle_pwd_command(args, stdout_file=None, stdout_append=False, stderr_file=
             with open(stdout_file, mode) as f:
                 f.write(output + '\n')
         except Exception as e:
-            if stderr_file:
-                try:
-                    mode = 'a' if stderr_append else 'w'
-                    with open(stderr_file, mode) as f:
-                        f.write(f"bash: {stdout_file}: {e}\n")
-                except:
-                    print(f"bash: {stdout_file}: {e}", file=sys.stderr)
-            else:
-                print(f"bash: {stdout_file}: {e}", file=sys.stderr)
+            print(f"bash: {stdout_file}: {e}", file=sys.stderr)
     else:
         print(output)
 
 
 def handle_cd_command(args, stdout_file=None, stdout_append=False, stderr_file=None, stderr_append=False):
-    """Handle the 'cd' command - changes current working directory."""
+    """Handle the 'cd' command."""
     if stderr_file:
         try:
             mode = 'a' if stderr_append else 'w'
@@ -370,7 +476,7 @@ def handle_cd_command(args, stdout_file=None, stdout_append=False, stderr_file=N
 
 
 def handle_type_command(args, builtin_commands, path_directories, stdout_file=None, stdout_append=False, stderr_file=None, stderr_append=False):
-    """Handle the 'type' command - shows what kind of command something is."""
+    """Handle the 'type' command."""
     if stderr_file:
         try:
             mode = 'a' if stderr_append else 'w'
@@ -408,11 +514,7 @@ def handle_type_command(args, builtin_commands, path_directories, stdout_file=No
             with open(stdout_file, mode) as f:
                 f.write(output + '\n')
         except Exception as e:
-            error_msg = f"bash: {stdout_file}: {e}\n"
-            if stderr_handle:
-                stderr_handle.write(error_msg)
-            else:
-                print(error_msg.rstrip(), file=sys.stderr)
+            print(f"bash: {stdout_file}: {e}", file=sys.stderr)
     else:
         print(output)
     
@@ -421,13 +523,7 @@ def handle_type_command(args, builtin_commands, path_directories, stdout_file=No
 
 
 def handle_history_command(args, stdout_file=None, stdout_append=False, stderr_file=None, stderr_append=False):
-    """
-    Handle the 'history' command - displays command history.
-    
-    Args:
-        args: Optional limit on number of entries to show
-    """
-    # Create stderr file if specified
+    """Handle the 'history' command."""
     if stderr_file:
         try:
             mode = 'a' if stderr_append else 'w'
@@ -435,16 +531,12 @@ def handle_history_command(args, stdout_file=None, stdout_append=False, stderr_f
         except:
             pass
     
-    # Determine how many entries to show
     if args:
         try:
             limit = int(args[0])
-            # Get the last 'limit' entries
             entries_to_show = COMMAND_HISTORY[-limit:] if limit > 0 else []
-            # Calculate starting index
             start_index = len(COMMAND_HISTORY) - len(entries_to_show)
         except ValueError:
-            # If argument is not a number, show error
             error_msg = f"history: {args[0]}: numeric argument required"
             if stdout_file:
                 try:
@@ -457,11 +549,9 @@ def handle_history_command(args, stdout_file=None, stdout_append=False, stderr_f
                 print(error_msg)
             return
     else:
-        # No limit - show all
         entries_to_show = COMMAND_HISTORY
         start_index = 0
     
-    # Format and display history
     output_lines = []
     for i, cmd in enumerate(entries_to_show, start=start_index + 1):
         output_lines.append(f"    {i}  {cmd}")
@@ -482,7 +572,7 @@ def handle_history_command(args, stdout_file=None, stdout_append=False, stderr_f
 
 
 def execute_external_command(command_parts, path_directories, stdout_file=None, stdout_append=False, stderr_file=None, stderr_append=False):
-    """Execute an external command (not a shell built-in)."""
+    """Execute an external command."""
     command_name = command_parts[0]
     
     executable_path = find_executable_in_path(command_name, path_directories)
@@ -514,29 +604,12 @@ def execute_external_command(command_parts, path_directories, stdout_file=None, 
                 
         except Exception as e:
             error_msg = f"Error executing {command_name}: {e}\n"
-            if stderr_file:
-                try:
-                    mode = 'a' if stderr_append else 'w'
-                    with open(stderr_file, mode) as f:
-                        f.write(error_msg)
-                except:
-                    print(error_msg.rstrip())
-            else:
-                print(error_msg.rstrip())
+            print(error_msg.rstrip())
     else:
         error_msg = f"{command_name}: command not found\n"
-        if stderr_file:
-            try:
-                mode = 'a' if stderr_append else 'w'
-                with open(stderr_file, mode) as f:
-                    f.write(error_msg)
-            except:
-                print(error_msg.rstrip())
-        else:
-            print(error_msg.rstrip())
+        print(error_msg.rstrip())
 
 
-# Tab completion setup
 BUILTIN_COMMANDS = ["echo", "exit"]
 PATH_DIRECTORIES = []
 EXECUTABLES_CACHE = set()
@@ -573,17 +646,11 @@ def main():
     """Main shell loop."""
     global PATH_DIRECTORIES
     
-    # Get PATH directories
     path_env = os.environ.get("PATH", "")
     PATH_DIRECTORIES = path_env.split(os.pathsep)
     
-    # Build executables cache
     update_executables_cache()
-    
-    # Setup tab completion
     setup_readline()
-    
-    BUILTIN_COMMANDS_SET = {"echo", "type", "exit", "pwd", "cd", "history"}
     
     while True:
         sys.stdout.write("$ ")
@@ -595,34 +662,24 @@ def main():
             print()
             break
         
-        # Add to history BEFORE parsing/executing
-        # This ensures the history command itself is in history
         COMMAND_HISTORY.append(user_input)
         
-        command_tokens, stdout_file, stdout_append, stderr_file, stderr_append = parse_command_with_redirection(user_input)
-        
-        if not command_tokens:
+        # Parse tokens
+        tokens = parse_command_with_quotes(user_input.strip())
+        if not tokens:
             continue
         
-        command_name = command_tokens[0]
-        arguments = command_tokens[1:]
+        # Split tokens by redirection operators
+        tokens = split_redirections(tokens)
         
-        if command_name == "exit":
-            should_exit = handle_exit_command(arguments, stdout_file, stdout_append, stderr_file, stderr_append)
-            if should_exit:
-                break
-        elif command_name == "echo":
-            handle_echo_command(arguments, stdout_file, stdout_append, stderr_file, stderr_append)
-        elif command_name == "pwd":
-            handle_pwd_command(arguments, stdout_file, stdout_append, stderr_file, stderr_append)
-        elif command_name == "cd":
-            handle_cd_command(arguments, stdout_file, stdout_append, stderr_file, stderr_append)
-        elif command_name == "type":
-            handle_type_command(arguments, BUILTIN_COMMANDS_SET, PATH_DIRECTORIES, stdout_file, stdout_append, stderr_file, stderr_append)
-        elif command_name == "history":
-            handle_history_command(arguments, stdout_file, stdout_append, stderr_file, stderr_append)
-        else:
-            execute_external_command(command_tokens, PATH_DIRECTORIES, stdout_file, stdout_append, stderr_file, stderr_append)
+        # Split by pipes
+        pipeline_commands = split_by_pipe(tokens)
+        
+        # Execute pipeline
+        result = execute_pipeline(pipeline_commands, PATH_DIRECTORIES)
+        
+        if result == "EXIT":
+            break
 
 
 if __name__ == "__main__":
