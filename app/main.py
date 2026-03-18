@@ -9,60 +9,81 @@ COMMAND_HISTORY = []
 
 
 def parse_command_with_quotes(command_string):
-    r"""Parse command string with quote handling."""
+    r"""
+    Parse command string, handling:
+    - Single quotes (everything literal)
+    - Double quotes (backslash escapes \ and " only)
+    - Backslash escaping outside quotes
+    """
     arguments = []
     current_argument = ""
-    quote_state = None
-    escape_next = False
+    quote_state = None  # None, 'SINGLE', or 'DOUBLE'
+    escape_next = False  # True if previous char was backslash
     
     for char in command_string:
+        # STEP 1: Handle escaped characters
         if escape_next:
             if quote_state == 'DOUBLE':
+                # Inside double quotes: only \ and " can be escaped
                 if char in ('\\', '"'):
                     current_argument += char
                 else:
+                    # Not a valid escape sequence - keep the backslash
                     current_argument += '\\' + char
             else:
+                # Outside quotes: add character as-is
                 current_argument += char
             escape_next = False
             continue
         
+        # STEP 2: Handle backslash
         if char == '\\':
             if quote_state == 'SINGLE':
+                # Inside single quotes: backslash is literal
                 current_argument += char
             else:
+                # Outside quotes or inside double quotes: next char might be escaped
                 escape_next = True
             continue
         
+        # STEP 3: Handle single quotes
         if char == "'":
             if quote_state is None:
                 quote_state = 'SINGLE'
             elif quote_state == 'SINGLE':
                 quote_state = None
             else:
+                # Inside double quotes, single quote is literal
                 current_argument += char
             continue
         
+        # STEP 4: Handle double quotes
         if char == '"':
             if quote_state is None:
                 quote_state = 'DOUBLE'
             elif quote_state == 'DOUBLE':
                 quote_state = None
             else:
+                # Inside single quotes, double quote is literal
                 current_argument += char
             continue
         
+        # STEP 5: Handle whitespace
         if char in (' ', '\t'):
             if quote_state is not None:
+                # Inside quotes: preserve whitespace
                 current_argument += char
             else:
+                # Outside quotes: whitespace ends the argument
                 if current_argument:
                     arguments.append(current_argument)
                     current_argument = ""
             continue
         
+        # STEP 6: Regular characters
         current_argument += char
     
+    # Handle trailing backslash
     if escape_next and quote_state != 'DOUBLE':
         current_argument += '\\'
     
@@ -73,7 +94,11 @@ def parse_command_with_quotes(command_string):
 
 
 def split_by_pipe(tokens):
-    """Split tokens by pipe operator."""
+    """
+    Split tokens by pipe operator.
+    
+    Returns: List of command segments (each segment is a list of tokens)
+    """
     commands = []
     current_command = []
     
@@ -220,6 +245,61 @@ def parse_command_with_redirection(command_string):
     return command_tokens, stdout_file, stdout_append, stderr_file, stderr_append
 
 
+def extract_redirections_from_tokens(tokens):
+    """
+    Extract redirections from already-parsed tokens.
+    
+    This is used in pipelines where tokens are already parsed
+    and we don't want to re-parse them (which would destroy quotes).
+    
+    Returns: (command_tokens, stdout_file, stdout_append, stderr_file, stderr_append)
+    """
+    stdout_file = None
+    stdout_append = False
+    stderr_file = None
+    stderr_append = False
+    
+    i = 0
+    command_tokens = []
+    
+    while i < len(tokens):
+        token = tokens[i]
+        
+        if token in ('>>', '1>>'):
+            if i + 1 < len(tokens):
+                stdout_file = tokens[i + 1]
+                stdout_append = True
+                i += 2
+            else:
+                i += 1
+        elif token in ('>', '1>'):
+            if i + 1 < len(tokens):
+                stdout_file = tokens[i + 1]
+                stdout_append = False
+                i += 2
+            else:
+                i += 1
+        elif token == '2>>':
+            if i + 1 < len(tokens):
+                stderr_file = tokens[i + 1]
+                stderr_append = True
+                i += 2
+            else:
+                i += 1
+        elif token == '2>':
+            if i + 1 < len(tokens):
+                stderr_file = tokens[i + 1]
+                stderr_append = False
+                i += 2
+            else:
+                i += 1
+        else:
+            command_tokens.append(token)
+            i += 1
+    
+    return command_tokens, stdout_file, stdout_append, stderr_file, stderr_append
+
+
 def find_executable_in_path(command_name, path_directories):
     """Search for an executable command in the PATH directories."""
     for directory in path_directories:
@@ -306,16 +386,21 @@ def execute_pipeline(pipeline_commands, path_directories):
     if not pipeline_commands:
         return
     
+    # Single command - no pipeline
     if len(pipeline_commands) == 1:
-        command_tokens, stdout_file, stdout_append, stderr_file, stderr_append = parse_command_with_redirection(' '.join(pipeline_commands[0]))
+        # Use extract_redirections_from_tokens instead of re-parsing
+        command_tokens, stdout_file, stdout_append, stderr_file, stderr_append = extract_redirections_from_tokens(pipeline_commands[0])
         execute_single_command(command_tokens, path_directories, stdout_file, stdout_append, stderr_file, stderr_append)
         return
     
+    # Multiple commands - create pipeline
     processes = []
     previous_output = None
     
     for i, cmd_tokens in enumerate(pipeline_commands):
-        command_tokens, stdout_file, stdout_append, stderr_file, stderr_append = parse_command_with_redirection(' '.join(cmd_tokens))
+        # Extract redirections from already-parsed tokens
+        # DON'T re-parse - it would destroy quoted executable names!
+        command_tokens, stdout_file, stdout_append, stderr_file, stderr_append = extract_redirections_from_tokens(cmd_tokens)
         
         if not command_tokens:
             continue
@@ -323,6 +408,7 @@ def execute_pipeline(pipeline_commands, path_directories):
         command_name = command_tokens[0]
         arguments = command_tokens[1:]
         
+        # Check if it's a built-in
         if is_builtin(command_name):
             output = execute_builtin_to_pipe(command_name, arguments, path_directories)
             
@@ -336,6 +422,7 @@ def execute_pipeline(pipeline_commands, path_directories):
             else:
                 previous_output = output
         else:
+            # External command
             executable_path = find_executable_in_path(command_name, path_directories)
             
             if not executable_path:
@@ -347,6 +434,7 @@ def execute_pipeline(pipeline_commands, path_directories):
                         pass
                 return
             
+            # Determine stdin
             if i == 0:
                 stdin_source = None
             elif previous_output is not None:
@@ -354,6 +442,7 @@ def execute_pipeline(pipeline_commands, path_directories):
             else:
                 stdin_source = processes[-1].stdout
             
+            # Determine stdout
             if i == len(pipeline_commands) - 1:
                 if stdout_file:
                     mode = 'a' if stdout_append else 'w'
@@ -363,6 +452,7 @@ def execute_pipeline(pipeline_commands, path_directories):
             else:
                 stdout_dest = subprocess.PIPE
             
+            # Determine stderr
             if stderr_file:
                 mode = 'a' if stderr_append else 'w'
                 stderr_dest = open(stderr_file, mode)
@@ -397,6 +487,7 @@ def execute_pipeline(pipeline_commands, path_directories):
                         pass
                 return
     
+    # Wait for all processes
     for proc in processes:
         proc.wait()
 
@@ -650,6 +741,7 @@ def execute_external_command(command_parts, path_directories, stdout_file=None, 
         print(error_msg.rstrip())
 
 
+# Tab completion setup
 BUILTIN_COMMANDS = ["echo", "exit"]
 PATH_DIRECTORIES = []
 EXECUTABLES_CACHE = set()
@@ -694,8 +786,6 @@ def main():
     
     while True:
         try:
-            # Use input() with prompt argument instead of sys.stdout.write
-            # This ensures readline properly handles the prompt
             user_input = input("$ ")
         except EOFError:
             print()
