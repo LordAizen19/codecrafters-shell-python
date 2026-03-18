@@ -257,10 +257,7 @@ def is_builtin(command_name):
 
 
 def execute_builtin_to_pipe(command_name, arguments, path_directories):
-    """
-    Execute a built-in command and return its output as a string.
-    Used when built-in is in a pipeline.
-    """
+    """Execute a built-in command and return its output as a string."""
     import io
     from contextlib import redirect_stdout
     
@@ -309,13 +306,11 @@ def execute_pipeline(pipeline_commands, path_directories):
     if not pipeline_commands:
         return
     
-    # Single command - no pipeline
     if len(pipeline_commands) == 1:
         command_tokens, stdout_file, stdout_append, stderr_file, stderr_append = parse_command_with_redirection(' '.join(pipeline_commands[0]))
         execute_single_command(command_tokens, path_directories, stdout_file, stdout_append, stderr_file, stderr_append)
         return
     
-    # Multiple commands - create pipeline
     processes = []
     previous_output = None
     
@@ -328,20 +323,10 @@ def execute_pipeline(pipeline_commands, path_directories):
         command_name = command_tokens[0]
         arguments = command_tokens[1:]
         
-        # Check if it's a built-in
         if is_builtin(command_name):
-            # Execute built-in and capture output
-            if i == 0:
-                # First command - no stdin from pipe
-                output = execute_builtin_to_pipe(command_name, arguments, path_directories)
-            else:
-                # Built-in with stdin from previous command
-                # For now, built-ins that need stdin aren't fully supported
-                # But we can pass the output along
-                output = execute_builtin_to_pipe(command_name, arguments, path_directories)
+            output = execute_builtin_to_pipe(command_name, arguments, path_directories)
             
             if i == len(pipeline_commands) - 1:
-                # Last command - print output
                 if stdout_file:
                     mode = 'a' if stdout_append else 'w'
                     with open(stdout_file, mode) as f:
@@ -349,10 +334,8 @@ def execute_pipeline(pipeline_commands, path_directories):
                 else:
                     print(output, end='')
             else:
-                # Not last - save output for next command
                 previous_output = output
         else:
-            # External command
             executable_path = find_executable_in_path(command_name, path_directories)
             
             if not executable_path:
@@ -364,17 +347,13 @@ def execute_pipeline(pipeline_commands, path_directories):
                         pass
                 return
             
-            # Determine stdin
             if i == 0:
                 stdin_source = None
             elif previous_output is not None:
-                # Previous was a built-in - use its output
                 stdin_source = subprocess.PIPE
             else:
-                # Previous was external - use its stdout
                 stdin_source = processes[-1].stdout
             
-            # Determine stdout
             if i == len(pipeline_commands) - 1:
                 if stdout_file:
                     mode = 'a' if stdout_append else 'w'
@@ -384,7 +363,6 @@ def execute_pipeline(pipeline_commands, path_directories):
             else:
                 stdout_dest = subprocess.PIPE
             
-            # Determine stderr
             if stderr_file:
                 mode = 'a' if stderr_append else 'w'
                 stderr_dest = open(stderr_file, mode)
@@ -400,7 +378,6 @@ def execute_pipeline(pipeline_commands, path_directories):
                     stderr=stderr_dest
                 )
                 
-                # If previous was a built-in, send its output to this process
                 if previous_output is not None:
                     proc.stdin.write(previous_output.encode())
                     proc.stdin.close()
@@ -408,7 +385,6 @@ def execute_pipeline(pipeline_commands, path_directories):
                 
                 processes.append(proc)
                 
-                # Close previous stdout
                 if len(processes) > 1 and processes[-2].stdout:
                     processes[-2].stdout.close()
                     
@@ -421,7 +397,6 @@ def execute_pipeline(pipeline_commands, path_directories):
                         pass
                 return
     
-    # Wait for all processes
     for proc in processes:
         proc.wait()
 
@@ -718,11 +693,10 @@ def main():
     setup_readline()
     
     while True:
-        sys.stdout.write("$ ")
-        sys.stdout.flush()
-        
         try:
-            user_input = input()
+            # Use input() with prompt argument instead of sys.stdout.write
+            # This ensures readline properly handles the prompt
+            user_input = input("$ ")
         except EOFError:
             print()
             break
