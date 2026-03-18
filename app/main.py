@@ -73,15 +73,7 @@ def parse_command_with_quotes(command_string):
 
 
 def split_by_pipe(tokens):
-    """
-    Split tokens by pipe operator.
-    
-    Returns: List of command segments (each segment is a list of tokens)
-    
-    Example:
-        ["cat", "file", "|", "grep", "hello"] 
-        → [["cat", "file"], ["grep", "hello"]]
-    """
+    """Split tokens by pipe operator."""
     commands = []
     current_command = []
     
@@ -158,7 +150,6 @@ def split_redirections(tokens):
             result.append('>')
             if after:
                 result.append(after)
-        # Handle pipe operator
         elif '|' in token:
             idx = token.index('|')
             before = token[:idx]
@@ -259,14 +250,62 @@ def get_executables_in_path(path_directories):
     return executables
 
 
-def execute_pipeline(pipeline_commands, path_directories):
+def is_builtin(command_name):
+    """Check if a command is a built-in."""
+    BUILTIN_COMMANDS_SET = {"echo", "type", "exit", "pwd", "cd", "history"}
+    return command_name in BUILTIN_COMMANDS_SET
+
+
+def execute_builtin_to_pipe(command_name, arguments, path_directories):
     """
-    Execute a pipeline of commands.
+    Execute a built-in command and return its output as a string.
+    Used when built-in is in a pipeline.
+    """
+    import io
+    from contextlib import redirect_stdout
     
-    Args:
-        pipeline_commands: List of command lists
-            Example: [["cat", "file"], ["grep", "hello"], ["wc", "-l"]]
-    """
+    output_buffer = io.StringIO()
+    
+    with redirect_stdout(output_buffer):
+        if command_name == "echo":
+            output = ' '.join(arguments) if arguments else ''
+            print(output)
+        elif command_name == "pwd":
+            print(os.getcwd())
+        elif command_name == "type":
+            if not arguments:
+                print("type: missing argument", file=sys.stderr)
+            else:
+                cmd = arguments[0]
+                if is_builtin(cmd):
+                    print(f"{cmd} is a shell builtin")
+                else:
+                    executable_path = find_executable_in_path(cmd, path_directories)
+                    if executable_path:
+                        print(f"{cmd} is {executable_path}")
+                    else:
+                        print(f"{cmd}: not found")
+        elif command_name == "history":
+            if arguments:
+                try:
+                    limit = int(arguments[0])
+                    entries_to_show = COMMAND_HISTORY[-limit:] if limit > 0 else []
+                    start_index = len(COMMAND_HISTORY) - len(entries_to_show)
+                except ValueError:
+                    print(f"history: {arguments[0]}: numeric argument required")
+                    return ""
+            else:
+                entries_to_show = COMMAND_HISTORY
+                start_index = 0
+            
+            for i, cmd in enumerate(entries_to_show, start=start_index + 1):
+                print(f"    {i}  {cmd}")
+    
+    return output_buffer.getvalue()
+
+
+def execute_pipeline(pipeline_commands, path_directories):
+    """Execute a pipeline of commands."""
     if not pipeline_commands:
         return
     
@@ -278,96 +317,122 @@ def execute_pipeline(pipeline_commands, path_directories):
     
     # Multiple commands - create pipeline
     processes = []
+    previous_output = None
     
     for i, cmd_tokens in enumerate(pipeline_commands):
-        # Parse redirection for this command
         command_tokens, stdout_file, stdout_append, stderr_file, stderr_append = parse_command_with_redirection(' '.join(cmd_tokens))
         
         if not command_tokens:
             continue
         
         command_name = command_tokens[0]
+        arguments = command_tokens[1:]
         
-        # Find executable
-        executable_path = find_executable_in_path(command_name, path_directories)
-        
-        if not executable_path:
-            print(f"{command_name}: command not found")
-            # Clean up any previous processes
-            for proc in processes:
-                try:
-                    proc.kill()
-                except:
-                    pass
-            return
-        
-        # Determine stdin
-        if i == 0:
-            # First command: stdin from terminal
-            stdin_source = None
-        else:
-            # Middle/last command: stdin from previous command
-            stdin_source = processes[i - 1].stdout
-        
-        # Determine stdout
-        if i == len(pipeline_commands) - 1:
-            # Last command
-            if stdout_file:
-                mode = 'a' if stdout_append else 'w'
-                stdout_dest = open(stdout_file, mode)
+        # Check if it's a built-in
+        if is_builtin(command_name):
+            # Execute built-in and capture output
+            if i == 0:
+                # First command - no stdin from pipe
+                output = execute_builtin_to_pipe(command_name, arguments, path_directories)
             else:
-                stdout_dest = None  # Terminal
-        else:
-            # Not last command: pipe to next
-            stdout_dest = subprocess.PIPE
-        
-        # Determine stderr
-        if stderr_file:
-            mode = 'a' if stderr_append else 'w'
-            stderr_dest = open(stderr_file, mode)
-        else:
-            stderr_dest = None  # Terminal
-        
-        # Start the process
-        try:
-            proc = subprocess.Popen(
-                command_tokens,
-                executable=executable_path,
-                stdin=stdin_source,
-                stdout=stdout_dest,
-                stderr=stderr_dest
-            )
-            processes.append(proc)
+                # Built-in with stdin from previous command
+                # For now, built-ins that need stdin aren't fully supported
+                # But we can pass the output along
+                output = execute_builtin_to_pipe(command_name, arguments, path_directories)
             
-            # Close the previous process's stdout in parent
-            # This is important for proper pipe behavior
-            if i > 0 and processes[i - 1].stdout:
-                processes[i - 1].stdout.close()
+            if i == len(pipeline_commands) - 1:
+                # Last command - print output
+                if stdout_file:
+                    mode = 'a' if stdout_append else 'w'
+                    with open(stdout_file, mode) as f:
+                        f.write(output)
+                else:
+                    print(output, end='')
+            else:
+                # Not last - save output for next command
+                previous_output = output
+        else:
+            # External command
+            executable_path = find_executable_in_path(command_name, path_directories)
+            
+            if not executable_path:
+                print(f"{command_name}: command not found")
+                for proc in processes:
+                    try:
+                        proc.kill()
+                    except:
+                        pass
+                return
+            
+            # Determine stdin
+            if i == 0:
+                stdin_source = None
+            elif previous_output is not None:
+                # Previous was a built-in - use its output
+                stdin_source = subprocess.PIPE
+            else:
+                # Previous was external - use its stdout
+                stdin_source = processes[-1].stdout
+            
+            # Determine stdout
+            if i == len(pipeline_commands) - 1:
+                if stdout_file:
+                    mode = 'a' if stdout_append else 'w'
+                    stdout_dest = open(stdout_file, mode)
+                else:
+                    stdout_dest = None
+            else:
+                stdout_dest = subprocess.PIPE
+            
+            # Determine stderr
+            if stderr_file:
+                mode = 'a' if stderr_append else 'w'
+                stderr_dest = open(stderr_file, mode)
+            else:
+                stderr_dest = None
+            
+            try:
+                proc = subprocess.Popen(
+                    command_tokens,
+                    executable=executable_path,
+                    stdin=stdin_source,
+                    stdout=stdout_dest,
+                    stderr=stderr_dest
+                )
                 
-        except Exception as e:
-            print(f"Error executing {command_name}: {e}")
-            # Clean up
-            for proc in processes:
-                try:
-                    proc.kill()
-                except:
-                    pass
-            return
+                # If previous was a built-in, send its output to this process
+                if previous_output is not None:
+                    proc.stdin.write(previous_output.encode())
+                    proc.stdin.close()
+                    previous_output = None
+                
+                processes.append(proc)
+                
+                # Close previous stdout
+                if len(processes) > 1 and processes[-2].stdout:
+                    processes[-2].stdout.close()
+                    
+            except Exception as e:
+                print(f"Error executing {command_name}: {e}")
+                for proc in processes:
+                    try:
+                        proc.kill()
+                    except:
+                        pass
+                return
     
-    # Wait for all processes to complete
+    # Wait for all processes
     for proc in processes:
         proc.wait()
 
 
 def execute_single_command(command_tokens, path_directories, stdout_file=None, stdout_append=False, stderr_file=None, stderr_append=False):
-    """Execute a single command (handles both builtins and external)."""
+    """Execute a single command."""
     if not command_tokens:
         return
     
     command_name = command_tokens[0]
     arguments = command_tokens[1:]
-    
-    BUILTIN_COMMANDS_SET = {"echo", "type", "exit", "pwd", "cd", "history"}
     
     if command_name == "exit":
         return "EXIT"
@@ -378,7 +443,7 @@ def execute_single_command(command_tokens, path_directories, stdout_file=None, s
     elif command_name == "cd":
         handle_cd_command(arguments, stdout_file, stdout_append, stderr_file, stderr_append)
     elif command_name == "type":
-        handle_type_command(arguments, BUILTIN_COMMANDS_SET, path_directories, stdout_file, stdout_append, stderr_file, stderr_append)
+        handle_type_command(arguments, path_directories, stdout_file, stdout_append, stderr_file, stderr_append)
     elif command_name == "history":
         handle_history_command(arguments, stdout_file, stdout_append, stderr_file, stderr_append)
     else:
@@ -475,7 +540,7 @@ def handle_cd_command(args, stdout_file=None, stdout_append=False, stderr_file=N
         stderr_handle.close()
 
 
-def handle_type_command(args, builtin_commands, path_directories, stdout_file=None, stdout_append=False, stderr_file=None, stderr_append=False):
+def handle_type_command(args, path_directories, stdout_file=None, stdout_append=False, stderr_file=None, stderr_append=False):
     """Handle the 'type' command."""
     if stderr_file:
         try:
@@ -499,7 +564,7 @@ def handle_type_command(args, builtin_commands, path_directories, stdout_file=No
     
     command_name = args[0]
     
-    if command_name in builtin_commands:
+    if is_builtin(command_name):
         output = f"{command_name} is a shell builtin"
     else:
         executable_path = find_executable_in_path(command_name, path_directories)
@@ -664,18 +729,13 @@ def main():
         
         COMMAND_HISTORY.append(user_input)
         
-        # Parse tokens
         tokens = parse_command_with_quotes(user_input.strip())
         if not tokens:
             continue
         
-        # Split tokens by redirection operators
         tokens = split_redirections(tokens)
-        
-        # Split by pipes
         pipeline_commands = split_by_pipe(tokens)
         
-        # Execute pipeline
         result = execute_pipeline(pipeline_commands, PATH_DIRECTORIES)
         
         if result == "EXIT":
