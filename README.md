@@ -4,117 +4,115 @@
 
 # Build Your Own Shell — Python
 
-A Unix-like shell implementation in Python, built as part of the CodeCrafters "Build Your Own Shell" challenge.
+A fully-functional Unix-like shell implementation in Python, built as part of the CodeCrafters "Build Your Own Shell" challenge.
 
-## Current Stage
+## What This Project Does
 
-The latest completed stage adds support for `history` as a shell builtin.
+This is an interactive shell that mimics core Unix shell behavior. It parses and executes commands, handles I/O redirection, supports pipelines, maintains command history, and provides tab completion—all implemented from scratch in Python without relying on shell libraries.
 
-The next stage is `listing history`.
+## Features
 
-## Overview
+- **Interactive REPL** with Unix-style prompt (`$ `)
+- **Built-in Commands**: `echo`, `exit`, `pwd`, `cd`, `type`, `history`
+- **External Command Execution** via `PATH` lookup
+- **Quote & Escape Handling**: 
+  - Single quotes (`'...'`) for literal strings
+  - Double quotes (`"..."`) for interpreted strings
+  - Backslash escape sequences
+- **I/O Redirection**:
+  - Stdout: `>`, `1>`, `>>`, `1>>`
+  - Stderr: `2>`, `2>>`
+  - Combined redirect support
+- **Pipeline Support**: Chain commands with `|` (e.g., `cat file.txt | grep foo | wc -l`)
+- **Command History**: Access and list previously run commands
+- **Tab Completion**: Auto-complete built-ins and executables from `PATH`
 
-This project implements an interactive shell with parsing, built-ins, external command execution, redirections, pipelines, command history, and tab completion. The shell follows Unix-like behavior for common commands and supports mixed built-in and external commands in pipelines.
+## Technologies Used
 
-## Implemented Features
+- **Language**: Python 3
+- **Core Libraries**:
+  - `readline` — tab completion and history
+  - `os` — file system and process management
+  - `subprocess` — external command execution
+  - `sys` — exit and I/O handling
+- **Key Concepts**:
+  - State machine parsing for quote/escape handling
+  - File descriptor management for pipes
+  - Process forking and redirection with `subprocess.Popen()`
 
-- Interactive REPL prompt (`$ `)
-- Built-in commands: `echo`, `exit`, `pwd`, `cd`, `type`, `history`
-- External command lookup through `PATH`
-- Quote-aware command tokenization:
-  - single quotes (`'...'`)
-  - double quotes (`"..."`)
-  - escape handling with backslashes
-- Output redirection support:
-  - stdout: `>`, `1>`, `>>`, `1>>`
-  - stderr: `2>`, `2>>`
-- Pipeline support with `|`
-- Mixed pipelines with built-ins and external commands
-- Command history tracking with `history`
-- Command tab completion (built-ins + executables from `PATH`)
+## How to Run It
 
-## How Parsing Works
+### Prerequisites
+- Python 3.6+
+- Unix-like environment (Linux, macOS, WSL)
 
-The parser processes input in stages:
-
-1. Tokenize with quote and escape awareness (`parse_command_with_quotes`)
-2. Split inline redirection operators from tokens (`split_redirections`)
-3. Detect and split pipelines (`split_pipes`)
-4. Extract redirection targets for non-pipeline commands (`parse_command_with_redirection`)
-
-Quote parsing uses a state machine with `quote_state` (`None`, `SINGLE`, `DOUBLE`) and `escape_next` to correctly preserve literals and spaces inside quotes.
-
-## Code Example
-
-```python
-def parse_command_with_redirection(command_string):
-    tokens = parse_command_with_quotes(command_string.strip())
-    if not tokens:
-        return [], None, False, None, False, []
-
-    tokens = split_redirections(tokens)
-
-    if '|' in tokens:
-        pipeline_commands = split_pipes(tokens)
-        return [], None, False, None, False, pipeline_commands
-
-    # parse stdout/stderr redirections from tokens
-    # and return command tokens + redirection metadata
-```
-
-## Supported Commands
-
-- `echo [args...]`
-- `pwd`
-- `cd [path]`
-- `type <command>`
-- `history`
-- `exit`
-
-If the command is not a built-in, the shell searches executable files in `PATH` and runs the first match.
-
-## Redirection and Pipeline Examples
-
-```bash
-echo "hello world" > out.txt
-echo "append" >> out.txt
-ls /not-found 2> err.txt
-cat file.txt | grep foo | wc -l
-echo "hi" | wc -c
-```
-
-## Tab Completion
-
-Tab completion is implemented with `readline` and supports:
-
-- Built-in command names
-- Executables discovered from `PATH`
-- Longest common prefix completion for multiple matches
-- Double-tab listing of all matching options
-
-## Running the Program
-
-The shell can be started using:
+### Running the Shell
 
 ```bash
 ./your_program.sh
 ```
 
-## Challenges Faced
+Or directly with Python:
 
-Implementing shell behavior required handling multiple edge cases cleanly:
+```bash
+python3 app/main.py
+```
 
-- Correct quote/escape parsing without breaking token boundaries
-- Splitting redirection operators when attached to tokens (for example `echo>file`)
-- Running built-ins inside pipelines while preserving shell process state
-- Avoiding pipeline deadlocks by closing the correct pipe file descriptors
-- Coordinating redirection behavior for stdout and stderr
+### Example Commands
 
-The implementation solves this with clear parser stages and careful file descriptor management for pipeline execution.
+```bash
+$ echo "Hello, World!"
+Hello, World!
+
+$ pwd
+/home/user/projects/shell
+
+$ echo "test" > output.txt
+
+$ cat file.txt | grep pattern | wc -l
+42
+
+$ history
+1  echo "Hello, World!"
+2  pwd
+3  echo "test" > output.txt
+
+$ cd /tmp
+$ type ls
+ls is /bin/ls
+```
+
+## What I Learned
+
+### 1. **Parsing Complexity**
+   - Quote and escape handling requires careful state machine design
+   - Operators can be inline with tokens (e.g., `echo>file`) and must be split correctly
+   - Multi-stage parsing is cleaner than trying to handle everything at once
+
+### 2. **Process Management**
+   - File descriptor handling is critical—unclosed pipes cause deadlocks
+   - `subprocess.Popen()` gives fine-grained control over stdin/stdout/stderr
+   - Proper cleanup of child processes prevents zombie processes
+
+### 3. **Pipeline Architecture**
+   - Pipelines chain processes by connecting stdout of one to stdin of the next
+   - Built-ins running inside pipelines need special handling to avoid forking the shell
+   - Buffering and I/O blocking can cause deadlocks without careful coordination
+
+### 4. **Shell Behavior Edge Cases**
+   - Exit codes must propagate correctly through pipelines
+   - Redirections have precedence and order matters
+   - Built-in commands like `cd` must modify the shell's own state, not a subprocess
+
+### 5. **User Experience**
+   - `readline` library provides familiar shell history and tab completion
+   - Longest common prefix matching for completions feels natural
+   - Clear separation between builtin and external commands improves maintainability
 
 ## Next Steps
 
 - Complete the `listing history` stage behavior
-- Add argument-level completion and filename/path completion
-- Improve error messages for malformed redirection syntax
-- Add support for more shell features (for example `;`, `&&`, environment variable expansion)
+- Add support for argument-level and filename completion
+- Implement command operators (`;`, `&&`, `||`)
+- Add environment variable expansion (`$VAR` syntax)
+- Improve error messages for malformed syntax
